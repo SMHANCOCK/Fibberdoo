@@ -1,0 +1,114 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Perudo Table</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app-shell">
+    <section id="profileScreen" class="screen profile-screen active">
+      <div class="hero-card">
+        <p class="eyebrow">Browser Perudo</p>
+        <h1>Choose your cup, sharpen your bluff.</h1>
+        <p class="intro">Intermediate rules, wild Pacos, Palifico drama, and a table of suspiciously chatty opponents.</p>
+        <form id="profileForm" class="profile-form">
+          <label>Player name<input id="playerName" maxlength="18" required placeholder="Steve" /></label>
+          <label>Avatar emoji<select id="avatarSelect"></select></label>
+          <label>Cup colour<input id="cupColour" type="color" value="#2f80ed" /></label>
+          <button type="submit" class="primary-button">Take a seat</button>
+        </form>
+      </div>
+    </section>
+
+    <section id="revealScreen" class="screen reveal-screen">
+      <div class="top-bar">
+        <h2>Tonight's Table</h2>
+        <button id="startGameButton" class="primary-button">Start Game</button>
+      </div>
+      <div id="opponentReveal" class="reveal-grid"></div>
+    </section>
+
+    <section id="gameScreen" class="screen game-screen">
+      <header class="game-header">
+        <div>
+          <p class="eyebrow">Current bid</p>
+          <h2 id="currentBidLabel">No bid yet</h2>
+          <p id="palificoBanner" class="palifico-banner hidden"></p>
+        </div>
+        <div class="header-actions">
+          <button id="leaderboardButton" class="ghost-button">Leaderboard</button>
+          <button id="settingsButton" class="ghost-button">Settings</button>
+        </div>
+      </header>
+
+      <section id="settingsPanel" class="settings-panel hidden">
+        <label>Banter<select id="banterLevel"><option>Off</option><option>Low</option><option selected>Normal</option><option>Savage</option></select></label>
+        <label><input id="soundToggle" type="checkbox" checked /> Sound On</label>
+        <label>Volume<input id="volumeSlider" type="range" min="0" max="1" step="0.05" value="0.45" /></label>
+        <label><input id="skipAnimationsToggle" type="checkbox" /> Skip animations</label>
+      </section>
+
+      <section id="currentActionPanel" class="current-action-panel">
+        <div>
+          <p class="eyebrow">Current Action</p>
+          <h3 id="actionMessage">Waiting for the round to begin...</h3>
+        </div>
+        <div class="action-facts">
+          <span id="actionTurn">Turn: -</span>
+          <span id="actionBid">Bid: No bid yet</span>
+          <span id="actionPreviousBidder">Previous bidder: -</span>
+          <span id="actionRequirement">Need: opening bid</span>
+          <span id="actionDiceRemaining">Dice in play: 0</span>
+        </div>
+      </section>
+
+      <div id="table" class="table"></div>
+
+      <section class="controls-card" id="humanControls">
+        <div class="control-row">
+          <label>Quantity<input id="bidQuantity" type="number" min="1" value="1" /></label>
+          <label>Face<select id="bidFace"><option value="1">Pacos / Ones</option><option value="2">Twos</option><option value="3">Threes</option><option value="4">Fours</option><option value="5">Fives</option><option value="6">Sixes</option></select></label>
+        </div>
+        <div class="control-row actions">
+          <button id="placeBidButton" class="primary-button">Place Bid</button>
+          <button id="dudoButton" class="danger-button">Dudo!</button>
+        </div>
+        <p id="bidHint" class="hint"></p>
+      </section>
+
+      <section class="lower-grid">
+        <div class="panel"><h3>Spectators</h3><div id="spectators" class="spectators"></div></div>
+        <div class="panel"><h3>Game Log</h3><div id="gameLog" class="game-log"></div></div>
+      </section>
+    </section>
+
+    <section id="gameOverScreen" class="screen game-over-screen">
+      <div class="winner-card">
+        <p class="eyebrow">Game Over</p>
+        <h2 id="winnerLabel"></h2>
+        <div id="rankChanges" class="rank-changes"></div>
+        <button id="replayButton" class="primary-button">Replay</button>
+      </div>
+      <div id="leaderboardPanel" class="leaderboard-panel"></div>
+    </section>
+
+    <dialog id="leaderboardDialog">
+      <button id="closeLeaderboard" class="close-button">Close</button>
+      <div id="leaderboardDialogContent"></div>
+    </dialog>
+  </main>
+
+  <script src="rules.js"></script>
+  <script src="cups.js"></script>
+  <script src="leaderboard.js"></script>
+  <script src="profile.js"></script>
+  <script src="mood.js"></script>
+  <script src="banter.js"></script>
+  <script src="ai.js"></script>
+  <script src="animations.js"></script>
+  <script src="sound.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
