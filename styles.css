@@ -253,12 +253,147 @@ dialog { border: 0; border-radius: 24px; padding: 18px; max-width: min(1000px, 9
   100% { opacity: 0; transform: translateY(-8px) scale(.99); }
 }
 @media (max-width: 760px) {
-  .app-shell { padding: 10px; }
-  .game-shell { padding: 10px 0; }
-  .table { border-width: 9px; border-radius: 28px; grid-template-columns: 1fr; }
-  .lower-grid { grid-template-columns: 1fr; }
-  .game-header { display: grid; gap: 12px; }
-  .action-facts { justify-content: flex-start; }
-  .profile-form label, .control-row label { width: 100%; }
-  .primary-button, .danger-button, .ghost-button { width: 100%; }
+  :root {
+    --player-card-width-mobile: 104px;
+    --player-card-height-mobile: 112px;
+    --dice-size-mobile: 20px;
+    --avatar-size-mobile: 1.65rem;
+    --bottom-controls-height: 178px;
+  }
+  html, body { min-height: 100%; }
+  .app-shell { padding: 0; min-height: 100dvh; }
+  .game-screen.active { display: block; height: 100dvh; overflow: hidden; }
+  .game-shell {
+    height: 100dvh;
+    padding: 8px 8px calc(var(--bottom-controls-height) + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    overflow: hidden;
+  }
+  .game-header {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 0;
+    align-items: center;
+  }
+  .game-header h2 { font-size: clamp(1.1rem, 6vw, 1.55rem); }
+  .game-header .eyebrow, .palifico-banner { font-size: .65rem; margin-bottom: 2px; }
+  .header-actions { gap: 6px; flex-wrap: nowrap; }
+  .header-actions .ghost-button { width: auto; padding: 8px 10px; font-size: .78rem; box-shadow: none; }
+  .settings-panel { padding: 8px; margin-bottom: 0; gap: 8px; font-size: .78rem; max-height: 33dvh; overflow: auto; }
+  .current-action-panel {
+    padding: 9px 10px;
+    margin-bottom: 0;
+    gap: 6px;
+    border-left-width: 5px;
+    border-radius: 16px;
+    flex: 0 0 auto;
+  }
+  .current-action-panel .eyebrow { font-size: .58rem; margin-bottom: 2px; }
+  .current-action-panel h3,
+  .action-message {
+    font-size: clamp(1rem, 4.5vw, 1.25rem);
+    line-height: 1.08;
+  }
+  .action-facts, .status-pills { gap: 5px; max-height: 48px; overflow: hidden; }
+  .action-facts span {
+    padding: 4px 7px;
+    font-size: .68rem;
+  }
+  #actionPreviousBidder, #actionRequirement { display: none; }
+  .table {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    position: relative;
+    display: block;
+    border-width: 8px;
+    border-radius: 30px;
+    padding: 8px;
+    overflow: visible;
+  }
+  .table .empty-seat { display: none; }
+  .seat {
+    position: absolute;
+    width: var(--player-card-width-mobile);
+    min-height: var(--player-card-height-mobile);
+    height: var(--player-card-height-mobile);
+    padding: 7px;
+    border-radius: 16px;
+    transform: translate(-50%, -50%);
+    overflow: visible;
+  }
+  .seat.active-turn { transform: translate(-50%, -50%) scale(1.04); outline-width: 3px; }
+  .avatar-line { gap: 5px; }
+  .avatar { font-size: var(--avatar-size-mobile); }
+  .player-name { font-size: .75rem; line-height: 1; max-width: 62px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rank-badge { font-size: .58rem; padding: 2px 5px; }
+  .cup { width: 28px; height: 31px; margin: 5px 0; border-width: 2px; border-radius: 8px 8px 12px 12px; }
+  .meta { font-size: .64rem; margin: 3px 0; }
+  .dice-row { gap: 3px; min-height: 22px; }
+  .die { width: var(--dice-size-mobile); height: var(--dice-size-mobile); border-radius: 6px; font-size: .68rem; border-width: 1px; }
+  .speech-bubble {
+    top: -30px;
+    left: -6px;
+    right: -6px;
+    padding: 6px 7px;
+    font-size: .68rem;
+    line-height: 1.1;
+    max-height: 2.4em;
+    overflow: hidden;
+  }
+  .shout-bubble { top: -42px; font-size: 1.15rem; padding: 8px 11px; }
+  .player-count-2.seat-pos-0 { left: 50%; top: 18%; }
+  .player-count-2.seat-pos-1 { left: 50%; top: 82%; }
+  .player-count-3.seat-pos-0 { left: 50%; top: 17%; }
+  .player-count-3.seat-pos-1 { left: 22%; top: 76%; }
+  .player-count-3.seat-pos-2 { left: 78%; top: 76%; }
+  .player-count-4.seat-pos-0 { left: 28%; top: 18%; }
+  .player-count-4.seat-pos-1 { left: 72%; top: 18%; }
+  .player-count-4.seat-pos-2 { left: 28%; top: 80%; }
+  .player-count-4.seat-pos-3 { left: 72%; top: 80%; }
+  .player-count-5.seat-pos-0 { left: 50%; top: 14%; }
+  .player-count-5.seat-pos-1 { left: 83%; top: 34%; }
+  .player-count-5.seat-pos-2 { left: 72%; top: 80%; }
+  .player-count-5.seat-pos-3 { left: 28%; top: 80%; }
+  .player-count-5.seat-pos-4 { left: 17%; top: 34%; }
+  .player-count-6.seat-pos-0 { left: 50%; top: 13%; }
+  .player-count-6.seat-pos-1 { left: 83%; top: 30%; }
+  .player-count-6.seat-pos-2 { left: 83%; top: 70%; }
+  .player-count-6.seat-pos-3 { left: 50%; top: 87%; }
+  .player-count-6.seat-pos-4 { left: 17%; top: 70%; }
+  .player-count-6.seat-pos-5 { left: 17%; top: 30%; }
+  .controls-card {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    margin: 0;
+    padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
+    border-radius: 18px 18px 0 0;
+    max-height: var(--bottom-controls-height);
+    overflow: hidden;
+  }
+  .control-row { display: grid; grid-template-columns: 1fr 1.25fr; gap: 8px; }
+  .control-row.actions { grid-template-columns: repeat(3, 1fr); margin-top: 8px; }
+  .controls-card label { font-size: .72rem; }
+  input, select { padding: 8px 9px; border-radius: 10px; min-width: 0; }
+  .primary-button, .danger-button, .ghost-button { width: 100%; padding: 10px 8px; font-size: .86rem; box-shadow: none; }
+  .hint { font-size: .68rem; line-height: 1.15; margin: 6px 0 0; max-height: 2.35em; overflow: hidden; }
+  .lower-grid { display: none; }
+  .profile-form label { width: 100%; }
+}
+
+@media (max-width: 900px) and (orientation: landscape) {
+  :root { --bottom-controls-height: 104px; --player-card-width-mobile: 96px; --player-card-height-mobile: 88px; --dice-size-mobile: 17px; --avatar-size-mobile: 1.35rem; }
+  .game-shell { padding-bottom: calc(var(--bottom-controls-height) + env(safe-area-inset-bottom)); }
+  .current-action-panel { padding: 7px 9px; }
+  .action-facts { max-height: 25px; }
+  .cup { display: none; }
+  .meta { display: none; }
+  .controls-card { max-height: var(--bottom-controls-height); display: grid; grid-template-columns: 1fr 1.4fr; gap: 8px; align-items: start; }
+  .control-row.actions { margin-top: 0; }
+  .hint { grid-column: 1 / -1; }
 }

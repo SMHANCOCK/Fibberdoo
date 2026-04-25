@@ -337,6 +337,23 @@
     updateBidHint();
     updateBidControls();
     renderActionPanel();
+    logMobileLayoutDiagnostics();
+  }
+
+  function isMobileLayoutActive() {
+    return window.matchMedia && window.matchMedia('(max-width: 767px)').matches;
+  }
+
+  function logMobileLayoutDiagnostics() {
+    if (!isMobileLayoutActive()) return;
+    var tableEl = $('table');
+    var controlsEl = $('humanControls');
+    var controlsFixed = controlsEl ? window.getComputedStyle(controlsEl).position === 'fixed' : false;
+    console.log('[MOBILE] screen width:', window.innerWidth);
+    console.log('[MOBILE] mobile layout active:', true);
+    console.log('[MOBILE] active players count:', activePlayers().length);
+    console.log('[MOBILE] player positions calculated:', tableEl ? tableEl.querySelectorAll('.seat').length : 0);
+    console.log('[MOBILE] controls fixed:', controlsFixed);
   }
 
   function safeText(value) {
@@ -386,9 +403,13 @@
       return;
     }
     try {
+      var activeCount = window.PerudoRules.getActivePlayers(state.players).length;
+      var activeSeatIndex = 0;
       var html = state.players.map(function (player, index) {
         try {
-          return renderSeat(player, index);
+          var seatHtml = renderSeat(player, index, activeSeatIndex, activeCount);
+          if (player && !player.empty && !player.eliminated) activeSeatIndex += 1;
+          return seatHtml;
         } catch (seatError) {
           console.error('[RENDER] failed player:', player, seatError);
           return renderSeatFallback(player);
@@ -409,7 +430,7 @@
     return '<article class="seat" data-player-id="' + safeText(safe.id) + '"><div class="avatar-line"><span class="avatar">' + safeText(safe.avatar) + '</span><div><div class="player-name">' + safeText(safe.name) + '</div><span class="rank-badge">-</span></div></div><div class="cup" style="--cup:' + safeText(safe.cupColour) + '"></div><p class="meta">Mood: calm · Dice: ' + safeText(safe.diceCount) + '</p><div class="dice-row"></div></article>';
   }
 
-  function renderSeat(p) {
+  function renderSeat(p, index, activeSeatIndex, activeCount) {
     p = normalizePlayerForRender(p);
     if (p.empty) return '<article class="seat empty-seat"><div class="avatar-line"><span class="avatar">○</span><span class="player-name">Empty Seat</span></div><p class="meta">No dice. No speech. Just vibes.</p></article>';
     var fg = window.PerudoCups && window.PerudoCups.getContrastColour ? window.PerudoCups.getContrastColour(p.cupColour) : '#fff8e7';
@@ -423,7 +444,8 @@
     var human = currentPlayer() && currentPlayer().id === p.id && p.human ? ' human-turn' : '';
     var palaficoFocus = state.palaficoPlayerId === p.id && state.palificoActive ? ' palafico-focus' : '';
     var eliminated = p.eliminated ? ' eliminated' : '';
-    return '<article class="seat' + active + human + palaficoFocus + eliminated + '" data-player-id="' + safeText(p.id) + '" style="--turn-color:' + safeText(p.cupColour) + '"><div class="avatar-line"><span class="avatar">' + safeText(p.avatar) + '</span><div><div class="player-name">' + safeText(p.name) + '</div><span class="rank-badge">' + safeText(rank) + '</span></div></div><div class="cup" style="--cup:' + safeText(p.cupColour) + '"></div><p class="meta">Mood: ' + safeText(p.mood) + ' · Dice: ' + safeText(p.diceCount) + '</p><div class="dice-row">' + dice + '</div></article>';
+    var mobileClass = ' player-count-' + safeText(activeCount || 0) + ' seat-pos-' + safeText(activeSeatIndex || 0);
+    return '<article class="seat' + active + human + palaficoFocus + eliminated + mobileClass + '" data-player-id="' + safeText(p.id) + '" style="--turn-color:' + safeText(p.cupColour) + '"><div class="avatar-line"><span class="avatar">' + safeText(p.avatar) + '</span><div><div class="player-name">' + safeText(p.name) + '</div><span class="rank-badge">' + safeText(rank) + '</span></div></div><div class="cup" style="--cup:' + safeText(p.cupColour) + '"></div><p class="meta">Mood: ' + safeText(p.mood) + ' · Dice: ' + safeText(p.diceCount) + '</p><div class="dice-row">' + dice + '</div></article>';
   }
 
   function getMinimumLegalBidText() {
