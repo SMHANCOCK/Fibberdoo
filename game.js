@@ -41,6 +41,8 @@
     gameOver: false,
     turnBusy: false,
     calzaWindowOpen: false,
+    quantityInputTouched: false,
+    bidInputContextKey: '',
     actionMessage: 'Waiting for the round to begin...'
   };
 
@@ -51,6 +53,10 @@
   function totalDiceInPlay() { return activePlayers().reduce(function (sum, p) { return sum + p.diceCount; }, 0); }
   function faceName(face) { return face === 1 ? 'aces' : ['', 'one', 'twos', 'threes', 'fours', 'fives', 'sixes'][face]; }
   function bidText(bid) { return bid ? bid.quantity + ' x ' + faceName(bid.face) : 'No bid yet'; }
+  function selectedBidFace() {
+    var faceEl = $('bidFace');
+    return faceEl ? Number(faceEl.value) || 2 : 2;
+  }
   function speechBidContext(bid) {
     return bid ? { bid: { quantity: bid.quantity, faceName: faceName(bid.face) }, quantity: bid.quantity, face: faceName(bid.face), currentBid: bidText(bid), lastBidder: state.previousBidderId ? playerById(state.previousBidderId).name : 'you' } : {};
   }
@@ -272,6 +278,8 @@
     state.gameOver = false;
     state.turnBusy = false;
     state.calzaWindowOpen = false;
+    state.quantityInputTouched = false;
+    state.bidInputContextKey = '';
     $('gameLog').innerHTML = '';
     showScreen('gameScreen');
     var humanIndex = state.players.findIndex(function (p) { return p.human; });
@@ -289,6 +297,8 @@
     state.revealMode = false;
     state.lockedFace = null;
     state.aceBidsThisRound = [];
+    state.quantityInputTouched = false;
+    state.bidInputContextKey = '';
     state.palaficoPlayerId = null;
     if (state.pendingPalificoPlayerId && window.shouldStartPalafico(playerById(state.pendingPalificoPlayerId), makeRoundState())) {
       state.palificoActive = true;
@@ -334,8 +344,8 @@
     $('dudoButton').disabled = !humanTurn || !state.currentBid;
     $('placeBidButton').disabled = !humanTurn;
     updateCalzaControl();
-    updateBidHint();
     updateBidControls();
+    updateBidHint();
     renderActionPanel();
     logMobileLayoutDiagnostics();
   }
@@ -448,16 +458,103 @@
     return '<article class="seat' + active + human + palaficoFocus + eliminated + mobileClass + '" data-player-id="' + safeText(p.id) + '" style="--turn-color:' + safeText(p.cupColour) + '"><div class="avatar-line"><span class="avatar">' + safeText(p.avatar) + '</span><div><div class="player-name">' + safeText(p.name) + '</div><span class="rank-badge">' + safeText(rank) + '</span></div></div><div class="cup" style="--cup:' + safeText(p.cupColour) + '"></div><p class="meta">Mood: ' + safeText(p.mood) + ' · Dice: ' + safeText(p.diceCount) + '</p><div class="dice-row">' + dice + '</div></article>';
   }
 
+  function legalBidsForFace(face, player, roundState) {
+    return window.getLegalBids(player, roundState).filter(function (bid) { return bid.face === Number(face); });
+  }
+
+  function getMinimumLegalQuantity(face, player, roundState) {
+    var legal = legalBidsForFace(face, player, roundState);
+    if (!legal.length) return null;
+    return legal.reduce(function (lowest, bid) { return Math.min(lowest, bid.quantity); }, legal[0].quantity);
+  }
+
+  function getGlobalMinimumLegalQuantity(player, roundState) {
+    var legal = window.getLegalBids(player, roundState);
+    if (!legal.length) return null;
+    return legal.reduce(function (lowest, bid) { return Math.min(lowest, bid.quantity); }, legal[0].quantity);
+  }
+
+  function bidInputContextKey(face, player) {
+    var bid = state.currentBid ? state.currentBid.quantity + ':' + state.currentBid.face : 'none';
+    return [
+      player && player.id || 'none',
+      bid,
+      state.previousBidderId || 'none',
+      state.roundNumber,
+      face,
+      state.palificoActive ? 'palafico' : 'normal',
+      state.lockedFace || 'unlocked'
+    ].join('|');
+  }
+
+  function ensureSelectedFaceHasLegalBid(player, roundState) {
+    var faceEl = $('bidFace');
+    if (!faceEl) return;
+    var legal = window.getLegalBids(player, roundState);
+    if (!legal.length) return;
+    var selectedFace = Number(faceEl.value) || 2;
+    var selectedFaceAllowed = legal.some(function (bid) { return bid.face === selectedFace; });
+    if (!selectedFaceAllowed && !state.quantityInputTouched) faceEl.value = String(legal[0].face);
+  }
+
+  function applySuggestedQuantity(force) {
+    var qtyEl = $('bidQuantity');
+    var faceEl = $('bidFace');
+    if (!qtyEl || !faceEl) return;
+    var player = currentPlayer();
+    var roundState = makeRoundState();
+    ensureSelectedFaceHasLegalBid(player, roundState);
+    var face = selectedBidFace();
+    var key = bidInputContextKey(face, player);
+    if (force || key !== state.bidInputContextKey) {
+      state.quantityInputTouched = false;
+      state.bidInputContextKey = key;
+    }
+    var minForFace = getMinimumLegalQuantity(face, player, roundState);
+    var fallbackMin = getGlobalMinimumLegalQuantity(player, roundState);
+    qtyEl.min = minForFace || fallbackMin || 1;
+    if (!state.quantityInputTouched) {
+      qtyEl.value = minForFace === null ? '' : String(minForFace);
+    }
+  }
+
+  function getBidValidationMessage(bid, player, roundState) {
+    if (!bid || !Number.isInteger(Number(bid.quantity)) || Number(bid.quantity) < 1) return 'Enter a whole-number bid quantity.';
+    if (state.palificoActive && state.currentBid && state.lockedFace && bid.face !== state.lockedFace && !window.isLegalBid(bid, state.currentBid, roundState, player)) {
+      return 'Palafico face is locked to ' + faceName(state.lockedFace) + '.';
+    }
+    if (!state.palificoActive && !state.currentBid && bid.face === 1) return 'Opening bid cannot be aces.';
+    if (!state.palificoActive && state.currentBid && state.currentBid.face !== 1 && bid.face === 1) return 'Minimum aces bid is ' + (getMinimumLegalQuantity(1, player, roundState) || window.getMinimumAceBid(state.currentBid)) + '.';
+    if (!state.palificoActive && state.currentBid && state.currentBid.face === 1 && bid.face !== 1) return 'Minimum normal bid is ' + window.getMinimumNormalBidFromAces(state.currentBid) + '.';
+    var minForFace = getMinimumLegalQuantity(bid.face, player, roundState);
+    if (minForFace !== null && Number(bid.quantity) < minForFace) return 'Minimum ' + faceName(bid.face) + ' bid is ' + minForFace + '.';
+    return 'That bid is not legal yet.';
+  }
+
   function getMinimumLegalBidText() {
     var player = currentPlayer();
-    var legal = window.getLegalBids(player, makeRoundState());
+    var roundState = makeRoundState();
+    var legal = window.getLegalBids(player, roundState);
     if (!legal.length) return 'No legal raise available. You must challenge.';
+    var selectedFace = selectedBidFace();
+    var selectedMin = getMinimumLegalQuantity(selectedFace, player, roundState);
     var first = legal[0];
-    if (state.palificoActive && state.currentBid) return 'Palafico: face locked to ' + faceName(state.lockedFace) + '. Minimum legal raise: ' + first.quantity + ' x ' + faceName(first.face) + '.';
-    if (state.palificoActive) return 'Palafico: opening bid locks the face. Aces are not wild.';
-    if (!state.currentBid) return 'Minimum legal bid: 1 x twos or higher. Opening on aces is not allowed.';
-    if (state.currentBid.face === 1) return 'From aces: minimum normal bid is ' + window.getMinimumNormalBidFromAces(state.currentBid) + ' of any normal face.';
-    return 'To switch to aces: at least ' + window.getMinimumAceBid(state.currentBid) + ' aces. Or raise quantity/face normally.';
+    if (state.palificoActive && state.currentBid) {
+      if (selectedFace !== state.lockedFace && selectedMin === null) return 'Palafico: face locked to ' + faceName(state.lockedFace) + '. You may only raise quantity.';
+      return 'Palafico: face locked to ' + faceName(state.lockedFace) + '. Minimum legal raise: ' + (selectedMin || first.quantity) + ' x ' + faceName(state.lockedFace) + '.';
+    }
+    if (state.palificoActive) {
+      if (selectedFace === 1 && player && player.id !== state.palaficoPlayerId) return 'Only the Palafico player may open with aces. Aces are not wild.';
+      return 'Palafico: opening bid locks the face. Aces are not wild.';
+    }
+    if (!state.currentBid) {
+      if (selectedFace === 1) return 'Opening bid cannot be aces.';
+      return 'Minimum legal bid: ' + (selectedMin || 1) + ' x ' + faceName(selectedFace) + '. Opening on aces is not allowed.';
+    }
+    if (selectedFace === 1 && state.currentBid.face !== 1) return 'Minimum aces bid: ' + (selectedMin || window.getMinimumAceBid(state.currentBid)) + '. You may bid higher.';
+    if (selectedFace !== 1 && state.currentBid.face === 1) return 'Minimum normal bid: ' + window.getMinimumNormalBidFromAces(state.currentBid) + '.';
+    if (selectedFace === 1) return 'Minimum aces bid: ' + (selectedMin || state.currentBid.quantity + 1) + '. You may bid higher.';
+    return 'Minimum ' + faceName(selectedFace) + ' bid: ' + (selectedMin || first.quantity) + '. Or switch to aces if legal.';
   }
 
   function updateBidHint() {
@@ -468,21 +565,51 @@
   }
 
   function updateBidControls() {
-    var qty = Number($('bidQuantity').value) || 1;
+    if (!$('bidQuantity') || !$('bidFace')) return;
+    applySuggestedQuantity(false);
     var player = currentPlayer();
     var roundState = makeRoundState();
     var legal = window.getLegalBids(player, roundState);
-    var min = legal.length ? legal.reduce(function (lowest, bid) { return Math.min(lowest, bid.quantity); }, legal[0].quantity) : 1;
-    $('bidQuantity').min = min;
-    if (qty < min) {
-      $('bidQuantity').value = min;
-      qty = min;
-    }
+    var legalFaces = legal.reduce(function (faces, bid) {
+      faces[bid.face] = true;
+      return faces;
+    }, {});
     var options = Array.from($('bidFace').options);
     options.forEach(function (option) {
-      var bid = { quantity: qty, face: Number(option.value) };
-      option.disabled = !window.isLegalBid(bid, state.currentBid, roundState, player);
+      option.disabled = !legalFaces[Number(option.value)];
     });
+  }
+
+  function handleQuantityInput() {
+    state.quantityInputTouched = true;
+    updateBidControls();
+    updateBidHint();
+  }
+
+  function handleFaceChange() {
+    state.quantityInputTouched = false;
+    state.bidInputContextKey = '';
+    applySuggestedQuantity(true);
+    updateBidControls();
+    updateBidHint();
+  }
+
+  function showBidInputError(message) {
+    if ($('bidHint')) $('bidHint').textContent = message;
+  }
+
+  function submitHumanBid() {
+    var raw = $('bidQuantity').value.trim();
+    var quantity = raw === '' ? NaN : Number(raw);
+    var bid = { quantity: quantity, face: selectedBidFace() };
+    var player = playerById('human') || currentPlayer();
+    var roundState = makeRoundState();
+    if (!Number.isInteger(quantity) || quantity < 1 || !window.isLegalBid(bid, state.currentBid, roundState, player)) {
+      showBidInputError(getBidValidationMessage(bid, player, roundState));
+      return false;
+    }
+    state.quantityInputTouched = false;
+    return placeBid('human', bid);
   }
 
   function updateCalzaControl() {
@@ -562,7 +689,11 @@
     var valid = window.isLegalBid(bid, state.currentBid, roundState, p);
     if (!valid) {
       state.turnBusy = false;
-      if (p.human) alert('Invalid bid for the current rules.');
+      if (p.human) {
+        showBidInputError(getBidValidationMessage(bid, p, roundState));
+        updateBidControls();
+        return false;
+      }
       renderGame();
       return false;
     }
@@ -806,10 +937,11 @@
       showScreen('revealScreen');
     });
     $('startGameButton').addEventListener('click', startGame);
-    $('placeBidButton').addEventListener('click', function () { placeBid('human', { quantity: Number($('bidQuantity').value), face: Number($('bidFace').value) }); });
+    $('placeBidButton').addEventListener('click', submitHumanBid);
     $('dudoButton').addEventListener('click', function () { callDudo('human'); });
     $('calzaButton').addEventListener('click', function () { callCalza('human'); });
-    $('bidQuantity').addEventListener('input', updateBidControls);
+    $('bidQuantity').addEventListener('input', handleQuantityInput);
+    $('bidFace').addEventListener('change', handleFaceChange);
     $('settingsButton').addEventListener('click', function () { $('settingsPanel').classList.toggle('hidden'); });
     $('banterLevel').addEventListener('change', function () { if (window.setBanterLevel) window.setBanterLevel($('banterLevel').value); else localStorage.setItem('perudoBanterLevel', $('banterLevel').value); });
     if ($('aiSkillLevel')) $('aiSkillLevel').addEventListener('change', function () { state.aiSkillLevel = $('aiSkillLevel').value; if (window.setAiSkillLevel) window.setAiSkillLevel(state.aiSkillLevel); });
@@ -822,6 +954,108 @@
     $('replayButton').addEventListener('click', function () { state.players = createPlayers(); renderReveal(); showScreen('revealScreen'); });
     state.profile = window.loadProfile();
     renderActionPanel();
+  }
+
+  function mobileNameCssAllowsWrapping() {
+    try {
+      var css = Array.from(document.styleSheets).map(function (sheet) {
+        return Array.from(sheet.cssRules || []).map(function (rule) { return rule.cssText; }).join('\n');
+      }).join('\n');
+      return css.indexOf('.player-name') !== -1 &&
+        css.indexOf('white-space: normal') !== -1 &&
+        css.indexOf('text-overflow: unset') !== -1 &&
+        css.indexOf('overflow: visible') !== -1;
+    } catch (err) {
+      console.warn('Could not inspect mobile name CSS:', err);
+      return false;
+    }
+  }
+
+  function runBidInputConsoleTests() {
+    var qtyEl = $('bidQuantity');
+    var faceEl = $('bidFace');
+    if (!qtyEl || !faceEl) {
+      return {
+        canClearQuantity: false,
+        canTypeHigherAceBid: false,
+        sixAcesAccepted: false,
+        sevenAcesAccepted: false,
+        fiveAcesRejected: false,
+        inputDoesNotAutoReset: false,
+        mobileNamesNotEllipsised: mobileNameCssAllowsWrapping()
+      };
+    }
+
+    var saved = {
+      players: state.players,
+      turnIndex: state.turnIndex,
+      currentBid: state.currentBid,
+      previousBidderId: state.previousBidderId,
+      palificoActive: state.palificoActive,
+      palaficoPlayerId: state.palaficoPlayerId,
+      lockedFace: state.lockedFace,
+      aceBidsThisRound: state.aceBidsThisRound,
+      quantityInputTouched: state.quantityInputTouched,
+      bidInputContextKey: state.bidInputContextKey,
+      qtyValue: qtyEl.value,
+      faceValue: faceEl.value
+    };
+
+    try {
+      state.players = [
+        { id: 'human', name: 'Test Human', human: true, empty: false, eliminated: false, diceCount: 5, dice: [2, 3, 4, 5, 6] },
+        { id: 'ai-test', name: 'Test AI', ai: true, empty: false, eliminated: false, diceCount: 5, dice: [1, 1, 2, 3, 4] },
+        { id: 'ai-two', name: 'Test Two', ai: true, empty: false, eliminated: false, diceCount: 5, dice: [2, 2, 5, 6, 6] }
+      ];
+      state.turnIndex = 0;
+      state.currentBid = { quantity: 11, face: 2 };
+      state.previousBidderId = 'ai-test';
+      state.palificoActive = false;
+      state.palaficoPlayerId = null;
+      state.lockedFace = null;
+      state.aceBidsThisRound = [];
+      faceEl.value = '1';
+      state.quantityInputTouched = false;
+      state.bidInputContextKey = '';
+      applySuggestedQuantity(true);
+
+      var suggestedSix = qtyEl.value === '6';
+      qtyEl.value = '';
+      state.quantityInputTouched = true;
+      updateBidControls();
+      var canClearQuantity = qtyEl.value === '';
+
+      qtyEl.value = '7';
+      state.quantityInputTouched = true;
+      updateBidControls();
+      var canTypeHigherAceBid = qtyEl.value === '7';
+      var inputDoesNotAutoReset = suggestedSix && canClearQuantity && canTypeHigherAceBid;
+      var roundState = makeRoundState();
+      var player = currentPlayer();
+
+      return {
+        canClearQuantity: canClearQuantity,
+        canTypeHigherAceBid: canTypeHigherAceBid,
+        sixAcesAccepted: window.isLegalBid({ quantity: 6, face: 1 }, state.currentBid, roundState, player),
+        sevenAcesAccepted: window.isLegalBid({ quantity: 7, face: 1 }, state.currentBid, roundState, player),
+        fiveAcesRejected: !window.isLegalBid({ quantity: 5, face: 1 }, state.currentBid, roundState, player),
+        inputDoesNotAutoReset: inputDoesNotAutoReset,
+        mobileNamesNotEllipsised: mobileNameCssAllowsWrapping()
+      };
+    } finally {
+      state.players = saved.players;
+      state.turnIndex = saved.turnIndex;
+      state.currentBid = saved.currentBid;
+      state.previousBidderId = saved.previousBidderId;
+      state.palificoActive = saved.palificoActive;
+      state.palaficoPlayerId = saved.palaficoPlayerId;
+      state.lockedFace = saved.lockedFace;
+      state.aceBidsThisRound = saved.aceBidsThisRound;
+      state.quantityInputTouched = saved.quantityInputTouched;
+      state.bidInputContextKey = saved.bidInputContextKey;
+      qtyEl.value = saved.qtyValue;
+      faceEl.value = saved.faceValue;
+    }
   }
 
   function runConsoleTests() {
@@ -874,6 +1108,14 @@
     console.assert(countTargets.length === 5 && countTargets[0].value === 4 && countTargets[1].value === 4 && countTargets[2].value === 4 && countTargets[3].value === 1, 'Challenge count animation orders face dice before wild aces');
     console.assert(window.getChallengeCountTargets({ quantity: 1, face: 4 }, mock, true).length === 3, 'Challenge count animation uses exact face only in Palafico');
     console.assert(PACE.bidResultPause >= 2500 && PACE.diceRevealPause >= 3000 && PACE.diceLossWinnerPause >= 4000, 'No AI turn starts before current animations/delays finish');
+    var bidInputChecks = runBidInputConsoleTests();
+    console.assert(bidInputChecks.canClearQuantity, 'User can clear quantity input');
+    console.assert(bidInputChecks.canTypeHigherAceBid, 'User can type 7 after suggested 6 aces');
+    console.assert(bidInputChecks.sixAcesAccepted, '6 aces is accepted after 11 twos');
+    console.assert(bidInputChecks.sevenAcesAccepted, '7 aces is accepted after 11 twos');
+    console.assert(bidInputChecks.fiveAcesRejected, '5 aces is rejected after 11 twos');
+    console.assert(bidInputChecks.inputDoesNotAutoReset, 'Quantity input does not auto-reset while typing');
+    console.assert(bidInputChecks.mobileNamesNotEllipsised, 'Mobile names are not ellipsised unnecessarily');
     var entry = { cupColourUsage: {} }; window.updateCupColourStats(entry, '#ffffff', true); window.updateCupColourStats(entry, '#ffffff', false);
     console.assert(window.getCupColourWinRate(entry.cupColourUsage['#ffffff']) === 50, 'Cup colour stat tracking');
     var originalBoard = localStorage.getItem('perudoGlobalLeaderboard');

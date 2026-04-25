@@ -325,10 +325,20 @@ dialog { border: 0; border-radius: 24px; padding: 18px; max-width: min(1000px, 9
     overflow: visible;
   }
   .seat.active-turn { transform: translate(-50%, -50%) scale(1.04); outline-width: 3px; }
-  .avatar-line { gap: 5px; }
-  .avatar { font-size: var(--avatar-size-mobile); }
-  .player-name { font-size: .75rem; line-height: 1; max-width: 62px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .rank-badge { font-size: .58rem; padding: 2px 5px; }
+  .avatar-line { gap: 5px; align-items: flex-start; }
+  .avatar-line > div { min-width: 0; flex: 1; display: grid; gap: 2px; }
+  .avatar { flex: 0 0 auto; font-size: var(--avatar-size-mobile); }
+  .player-name {
+    font-size: .68rem;
+    line-height: 1.05;
+    max-width: 100%;
+    overflow: visible;
+    text-overflow: unset;
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-break: normal;
+  }
+  .rank-badge { font-size: .55rem; padding: 2px 5px; width: fit-content; }
   .cup { width: 28px; height: 31px; margin: 5px 0; border-width: 2px; border-radius: 8px 8px 12px 12px; }
   .meta { font-size: .64rem; margin: 3px 0; }
   .dice-row { gap: 3px; min-height: 22px; }
