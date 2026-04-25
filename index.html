@@ -31,6 +31,7 @@
     </section>
 
     <section id="gameScreen" class="screen game-screen">
+      <div class="game-shell">
       <header class="game-header">
         <div>
           <p class="eyebrow">Current bid</p>
@@ -44,18 +45,21 @@
       </header>
 
       <section id="settingsPanel" class="settings-panel hidden">
-        <label>Banter<select id="banterLevel"><option>Off</option><option>Low</option><option selected>Normal</option><option>Savage</option></select></label>
+        <label>Banter<select id="banterLevel"><option value="0">0 Minimal</option><option value="1">1 Light</option><option value="2" selected>2 Mocky</option><option value="3">3 Savage</option></select></label>
+        <label>AI Skill<select id="aiSkillLevel"><option value="easy">Easy</option><option value="normal">Normal</option><option value="hard" selected>Hard</option><option value="expert">Expert</option></select></label>
         <label><input id="soundToggle" type="checkbox" checked /> Sound On</label>
         <label>Volume<input id="volumeSlider" type="range" min="0" max="1" step="0.05" value="0.45" /></label>
         <label><input id="skipAnimationsToggle" type="checkbox" /> Skip animations</label>
+        <label><input id="calzaToggle" type="checkbox" checked /> Enable Calza rule</label>
       </section>
 
-      <section id="currentActionPanel" class="current-action-panel">
-        <div>
+      <section id="currentActionPanel" class="current-action-panel action-panel">
+        <div class="action-main">
           <p class="eyebrow">Current Action</p>
-          <h3 id="actionMessage">Waiting for the round to begin...</h3>
+          <h3 id="actionMessage" class="action-message">Waiting for the round to begin...</h3>
         </div>
-        <div class="action-facts">
+        <div class="action-facts status-pills">
+          <span id="actionRound">Round 0</span>
           <span id="actionTurn">Turn: -</span>
           <span id="actionBid">Bid: No bid yet</span>
           <span id="actionPreviousBidder">Previous bidder: -</span>
@@ -69,19 +73,22 @@
       <section class="controls-card" id="humanControls">
         <div class="control-row">
           <label>Quantity<input id="bidQuantity" type="number" min="1" value="1" /></label>
-          <label>Face<select id="bidFace"><option value="1">Pacos / Ones</option><option value="2">Twos</option><option value="3">Threes</option><option value="4">Fours</option><option value="5">Fives</option><option value="6">Sixes</option></select></label>
+          <label>Face<select id="bidFace"><option value="1">Aces / Ones</option><option value="2">Twos</option><option value="3">Threes</option><option value="4">Fours</option><option value="5">Fives</option><option value="6">Sixes</option></select></label>
         </div>
         <div class="control-row actions">
           <button id="placeBidButton" class="primary-button">Place Bid</button>
           <button id="dudoButton" class="danger-button">Dudo!</button>
+          <button id="calzaButton" class="ghost-button calza-disabled" title="Call exact">Calza</button>
         </div>
         <p id="bidHint" class="hint"></p>
+        <p id="calzaHint" class="hint calza-hint">Calza disabled in settings</p>
       </section>
 
       <section class="lower-grid">
         <div class="panel"><h3>Spectators</h3><div id="spectators" class="spectators"></div></div>
         <div class="panel"><h3>Game Log</h3><div id="gameLog" class="game-log"></div></div>
       </section>
+      </div>
     </section>
 
     <section id="gameOverScreen" class="screen game-over-screen">

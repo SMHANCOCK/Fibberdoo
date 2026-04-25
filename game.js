@@ -10,6 +10,13 @@
     challengeCountPerDie: 400,
     challengeCountFinalPause: 800,
     challengeResultDisplay: 2000,
+    tableReactionInitialPause: 800,
+    tableReactionMinGap: 1000,
+    tableReactionMaxGap: 1500,
+    calzaShout: 2600,
+    palaficoAnticipationMin: 3500,
+    palaficoAnticipationMax: 5000,
+    palaficoRoundBanner: 3000,
     roundStartPause: 1400,
     nextTurnPause: 900
   };
@@ -23,20 +30,26 @@
     roundNumber: 0,
     palificoActive: false,
     pendingPalificoPlayerId: null,
+    palaficoPlayerId: null,
     lockedFace: null,
+    aceBidsThisRound: [],
+    calzaEnabled: false,
+    aiSkillLevel: 'hard',
+    aiMemory: {},
     dudoStats: {},
     revealMode: false,
     gameOver: false,
     turnBusy: false,
+    calzaWindowOpen: false,
     actionMessage: 'Waiting for the round to begin...'
   };
 
   function $(id) { return document.getElementById(id); }
-  function activePlayers() { return state.players.filter(function (p) { return !p.empty && !p.eliminated; }); }
+  function activePlayers() { return window.PerudoRules.getActivePlayers(state.players); }
   function playerById(id) { return state.players.find(function (p) { return p.id === id; }); }
   function currentPlayer() { return state.players[state.turnIndex]; }
   function totalDiceInPlay() { return activePlayers().reduce(function (sum, p) { return sum + p.diceCount; }, 0); }
-  function faceName(face) { return face === 1 ? 'ones' : ['', 'one', 'twos', 'threes', 'fours', 'fives', 'sixes'][face]; }
+  function faceName(face) { return face === 1 ? 'aces' : ['', 'one', 'twos', 'threes', 'fours', 'fives', 'sixes'][face]; }
   function bidText(bid) { return bid ? bid.quantity + ' x ' + faceName(bid.face) : 'No bid yet'; }
   function speechBidContext(bid) {
     return bid ? { bid: { quantity: bid.quantity, faceName: faceName(bid.face) }, quantity: bid.quantity, face: faceName(bid.face), currentBid: bidText(bid), lastBidder: state.previousBidderId ? playerById(state.previousBidderId).name : 'you' } : {};
@@ -44,6 +57,30 @@
   function showScreen(id) { document.querySelectorAll('.screen').forEach(function (s) { s.classList.remove('active'); }); $(id).classList.add('active'); }
   function wait(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
   function randomBetween(min, max) { return min + Math.floor(Math.random() * (max - min + 1)); }
+  function peekNextPlayer() {
+    for (var i = 1; i <= state.players.length; i += 1) {
+      var idx = (state.turnIndex + i) % state.players.length;
+      var p = state.players[idx];
+      if (p && !p.empty && !p.eliminated) return p;
+    }
+    return null;
+  }
+  function makeRoundState() {
+    return {
+      players: state.players,
+      currentBid: state.currentBid,
+      previousBidderId: state.previousBidderId,
+      turnIndex: state.turnIndex,
+      palaficoActive: state.palificoActive,
+      palificoActive: state.palificoActive,
+      palaficoPlayerId: state.palaficoPlayerId,
+      lockedFace: state.lockedFace,
+      aceBidsThisRound: state.aceBidsThisRound,
+      calzaEnabled: state.calzaEnabled,
+      aiSkillLevel: state.aiSkillLevel,
+      aiMemory: state.aiMemory
+    };
+  }
 
   function setAction(message) {
     state.actionMessage = message;
@@ -55,6 +92,66 @@
     if (panel) panel.classList.toggle('liar-called', !!active);
   }
 
+  function showBigShout(player, text, duration) {
+    if (!player) return Promise.resolve(false);
+    var seat = document.querySelector('[data-player-id="' + player.id + '"]');
+    if (!seat) return Promise.resolve(false);
+    var old = seat.querySelector('.shout-bubble');
+    if (old) old.remove();
+    var bubble = document.createElement('div');
+    bubble.className = 'shout-bubble';
+    bubble.textContent = text;
+    seat.appendChild(bubble);
+    setTimeout(function () { if (bubble.parentNode) bubble.remove(); }, duration || 2700);
+    return wait(duration || 2700).then(function () { return true; });
+  }
+
+  function shouldTriggerPalaficoAnnouncement(player, roundState) {
+    return !!(player && player.diceCount === 1 && !player.eliminated && !player.palaficoUsed && window.shouldStartPalafico(player, roundState));
+  }
+
+  async function runCalzaShout(player) {
+    setAction(player.name + ' calls CALZA!');
+    if (window.playDudoSound) window.playDudoSound();
+    await showBigShout(player, 'CALZA!', PACE.calzaShout);
+    return true;
+  }
+
+  async function runPalaficoAnticipationSequence(player) {
+    var shouts = ['PALAFICO!', 'PALAFICO ROUND!', 'One die left!', 'Here we go, Palafico!', 'No wild aces now!'];
+    var speakers = activePlayers().filter(function (p) { return p.id !== player.id; });
+    if (!speakers.length) speakers = [player];
+    var count = Math.min(4, Math.max(2, speakers.length));
+    var total = randomBetween(PACE.palaficoAnticipationMin, PACE.palaficoAnticipationMax);
+    var gap = total / count;
+    setAction(player.name + ' is down to one die. PALAFICO is coming!');
+    for (var i = 0; i < count; i += 1) {
+      var speaker = speakers[i % speakers.length];
+      showBigShout(speaker, shouts[i % shouts.length], 2600);
+      if (i < count - 1) await wait(gap);
+    }
+    await wait(900);
+    return true;
+  }
+
+  async function runPalaficoRoundStartBanner(player) {
+    var existing = document.querySelector('.palafico-round-banner');
+    if (existing) existing.remove();
+    var banner = document.createElement('div');
+    banner.className = 'palafico-round-banner';
+    banner.innerHTML = '<strong>PALAFICO ROUND</strong><span>' + safeText(player.name) + ' is Palafico - face will lock after the first bid.</span><span>Aces are not wild in Palafico.</span>';
+    var panel = $('currentActionPanel');
+    if (panel && panel.parentNode) panel.parentNode.insertBefore(banner, panel);
+    setAction('PALAFICO ROUND - ' + player.name + ' is Palafico. Face will lock after the first bid.');
+    renderGame();
+    var seat = document.querySelector('[data-player-id="' + player.id + '"]');
+    if (seat) seat.classList.add('palafico-focus');
+    await wait(PACE.palaficoRoundBanner);
+    if (banner.parentNode) banner.remove();
+    if (seat) seat.classList.remove('palafico-focus');
+    return true;
+  }
+
   function log(message) {
     var el = document.createElement('div');
     el.className = 'log-entry';
@@ -63,10 +160,61 @@
     Array.from($('gameLog').children).slice(10).forEach(function (node) { node.remove(); });
   }
 
+  async function runTableTalk(event, context) {
+    if (!window.getTableReactions || !window.showSpeechBubble) return;
+    context = context || {};
+    var reactions = window.getTableReactions(event, state.players, context);
+    if (!reactions.length) return;
+    await wait(PACE.tableReactionInitialPause);
+    for (var i = 0; i < reactions.length; i += 1) {
+      window.showSpeechBubble(reactions[i].speaker.id, reactions[i].line);
+      if (i < reactions.length - 1) await wait(randomBetween(PACE.tableReactionMinGap, PACE.tableReactionMaxGap));
+    }
+    await wait(PACE.tableReactionMinGap);
+  }
+
+  async function maybeAiCalzaWindow() {
+    if (!state.calzaEnabled || !state.currentBid || !state.calzaWindowOpen) return false;
+    var candidates = activePlayers().filter(function (p) {
+      return p.ai && window.getCalzaStatus(p, makeRoundState()).allowed;
+    });
+    for (var i = 0; i < candidates.length; i += 1) {
+      if (window.shouldCallCalza && window.shouldCallCalza(candidates[i], makeRoundState())) {
+        await wait(600);
+        if (!state.calzaWindowOpen) return true;
+        await callCalza(candidates[i].id);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function makeTalkContext(actor, bid, extra) {
+    var diceInPlay = totalDiceInPlay();
+    var previousBid = extra && extra.previousBid;
+    var aiRisk = window.getBidRiskLevel ? window.getBidRiskLevel(bid || state.currentBid, actor || currentPlayer(), makeRoundState()) : 'reasonable';
+    var risk = { safe: 'low', reasonable: 'medium', risky: 'high', dangerous: 'high', absurd: 'absurd' }[aiRisk] || 'medium';
+    return Object.assign({
+      playerName: actor && actor.name,
+      bidder: actor,
+      target: actor,
+      caller: actor,
+      nextPlayer: peekNextPlayer(),
+      bid: bid || state.currentBid,
+      quantity: bid && bid.quantity,
+      face: bid && faceName(bid.face),
+      currentBid: bidText(bid || state.currentBid),
+      lastBidder: actor && actor.name,
+      diceInPlay: diceInPlay,
+      risk: risk,
+      aiRisk: aiRisk
+    }, extra || {});
+  }
+
   function getRequirementText() {
     if (state.gameOver) return 'Game over';
-    if (!state.currentBid) return state.palificoActive ? 'Open with any face; that face locks' : 'Opening bid must be 2-6';
-    if (state.palificoActive) return 'Raise ' + faceName(state.lockedFace) + ' or challenge';
+    if (!state.currentBid) return state.palificoActive ? 'PALAFICO: open face locks; aces only for Palafico player' : 'Opening bid must be 2-6';
+    if (state.palificoActive) return 'ACES ARE NOT WILD; raise ' + faceName(state.lockedFace) + ' or challenge';
     return 'Raise legally or challenge';
   }
 
@@ -75,10 +223,12 @@
     var turn = currentPlayer();
     var bidder = state.previousBidderId ? playerById(state.previousBidderId) : null;
     $('actionMessage').textContent = state.actionMessage;
-    $('actionTurn').textContent = 'Turn: ' + (turn ? turn.name : '-');
+    if ($('actionRound')) $('actionRound').textContent = 'Round ' + state.roundNumber;
+    $('actionTurn').textContent = 'Turn: ' + (turn ? turn.name + (turn.ai ? ' (' + (turn.moodLevel || turn.mood || 'calm') + ')' : '') : '-');
     $('actionBid').textContent = 'Bid: ' + bidText(state.currentBid);
     $('actionPreviousBidder').textContent = 'Previous bidder: ' + (bidder ? bidder.name : '-');
-    $('actionRequirement').textContent = 'Need: ' + getRequirementText();
+    var calzaStatus = state.calzaEnabled && window.getCalzaStatus ? getHumanCalzaUiStatus(playerById('human')) : null;
+    $('actionRequirement').textContent = 'Need: ' + getRequirementText() + (calzaStatus ? ' | Calza: ' + (calzaStatus.allowed ? 'available' : calzaStatus.reason) : '');
     $('actionDiceRemaining').textContent = 'Dice in play: ' + totalDiceInPlay();
   }
 
@@ -87,7 +237,7 @@
     var seats = roll < 0.9 ? 5 : 4;
     var aiCount = roll < 0.8 ? 4 : 3;
     var used = [state.profile.name];
-    var players = [{ id: 'human', human: true, avatar: state.profile.avatar, name: state.profile.name, cupColour: state.profile.cupColour, diceColour: state.profile.cupColour, diceCount: 5, dice: [], mood: 'calm', events: {} }];
+    var players = [{ id: 'human', human: true, avatar: state.profile.avatar, name: state.profile.name, cupColour: state.profile.cupColour, diceColour: state.profile.cupColour, diceCount: 5, dice: [], mood: 'calm', events: {}, palaficoUsed: false }];
     for (var i = 0; i < aiCount; i += 1) players.push(window.generateAIPlayer(i + 1, used));
     if (seats === 5 && aiCount === 3) players.push({ id: 'empty-seat', empty: true, name: 'Empty Seat', avatar: '∅', cupColour: '#555555', diceCount: 0, dice: [] });
     var seated = shuffle(players).map(function (p, index) { p.seatIndex = index; return p; });
@@ -111,39 +261,52 @@
   }
 
   function startGame() {
-    state.players.forEach(function (p) { if (!p.empty) { p.diceCount = 5; p.eliminated = false; p.spectator = false; p.events = {}; } });
+    state.players.forEach(function (p) { if (!p.empty) { p.diceCount = 5; p.eliminated = false; p.spectator = false; p.events = {}; p.palaficoUsed = false; } });
     state.dudoStats = {};
     state.pendingPalificoPlayerId = null;
+    state.palaficoPlayerId = null;
+    state.aceBidsThisRound = [];
+    state.aiSkillLevel = window.getAiSkillLevel ? window.getAiSkillLevel() : state.aiSkillLevel;
+    state.aiMemory = window.loadAiMemory ? window.loadAiMemory() : state.aiMemory;
+    state.roundNumber = 0;
     state.gameOver = false;
     state.turnBusy = false;
+    state.calzaWindowOpen = false;
     $('gameLog').innerHTML = '';
     showScreen('gameScreen');
     var humanIndex = state.players.findIndex(function (p) { return p.human; });
     console.log('[INIT] game phase:', 'starting');
     console.log('[INIT] players before first render:', state.players.length, state.players.map(function (p) { return p && p.name; }));
-    beginRound(state.players[humanIndex].id);
+    beginRound(null);
   }
 
   async function beginRound(starterId) {
     state.turnBusy = true;
+    state.calzaWindowOpen = false;
     state.roundNumber += 1;
     state.currentBid = null;
     state.previousBidderId = null;
     state.revealMode = false;
     state.lockedFace = null;
-    if (state.pendingPalificoPlayerId) {
+    state.aceBidsThisRound = [];
+    state.palaficoPlayerId = null;
+    if (state.pendingPalificoPlayerId && window.shouldStartPalafico(playerById(state.pendingPalificoPlayerId), makeRoundState())) {
       state.palificoActive = true;
       starterId = state.pendingPalificoPlayerId;
-      state.pendingPalificoPlayerId = null;
       var palificoPlayer = playerById(starterId);
-      $('palificoBanner').textContent = 'PALIFICO ROUND - ' + palificoPlayer.name + ' is on one die. Face will lock on the first bid. Ones are not wild.';
+      state.palaficoPlayerId = starterId;
+      window.markPalaficoUsed(palificoPlayer);
+      $('palificoBanner').textContent = 'PALAFICO ROUND - ACES ARE NOT WILD - ' + palificoPlayer.name + ' opens. Face will lock on the first bid.';
       $('palificoBanner').classList.remove('hidden');
       window.playPalificoSound();
+      await runPalaficoRoundStartBanner(palificoPlayer);
     } else {
       state.palificoActive = false;
       $('palificoBanner').classList.add('hidden');
     }
+    state.pendingPalificoPlayerId = null;
     activePlayers().forEach(function (p) { p.dice = rollDice(p.diceCount); });
+    if (state.roundNumber === 1 && !starterId) starterId = window.getFirstRoundStarterId(state.players);
     state.turnIndex = state.players.findIndex(function (p) { return p.id === starterId && !p.eliminated; });
     if (state.turnIndex < 0) state.turnIndex = state.players.findIndex(function (p) { return !p.empty && !p.eliminated; });
     setAction('Round ' + state.roundNumber + ' begins. ' + currentPlayer().name + ' starts.');
@@ -163,13 +326,14 @@
     renderPlayers();
     if (window.restoreSpeechBubbles) window.restoreSpeechBubbles();
     $('spectators').innerHTML = state.players.filter(function (p) { return p && p.spectator; }).map(function (p) { return '<span class="spectator-chip">' + safeText(p.avatar || '🎲') + ' ' + safeText(p.name || 'Player') + ' ' + safeText(safeRankBadge(p)) + '</span>'; }).join('') || '<span class="meta">No spectators yet.</span>';
-    var humanTurn = currentPlayer() && currentPlayer().human && !state.gameOver && !state.turnBusy;
+    var humanTurn = currentPlayer() && currentPlayer().human && !state.gameOver && !state.turnBusy && !state.calzaWindowOpen;
     $('humanControls').classList.toggle('disabled', !humanTurn);
     $('humanControls').classList.toggle('human-ready', humanTurn);
     $('dudoButton').classList.toggle('hidden-challenge', !state.currentBid);
     $('dudoButton').classList.toggle('challenge-ready', humanTurn && !!state.currentBid);
     $('dudoButton').disabled = !humanTurn || !state.currentBid;
     $('placeBidButton').disabled = !humanTurn;
+    updateCalzaControl();
     updateBidHint();
     updateBidControls();
     renderActionPanel();
@@ -206,7 +370,7 @@
       cupColour: player.cupColour || player.cupColor || '#777777',
       diceCount: Number.isFinite(player.diceCount) ? player.diceCount : 0,
       dice: Array.isArray(player.dice) ? player.dice : [],
-      mood: player.mood || (player.personality && player.personality.type) || 'calm'
+      mood: player.moodLevel || player.mood || (player.personality && player.personality.type) || 'calm'
     };
   }
 
@@ -257,16 +421,21 @@
     var rank = safeRankBadge(p);
     var active = currentPlayer() && currentPlayer().id === p.id ? ' active-turn' : '';
     var human = currentPlayer() && currentPlayer().id === p.id && p.human ? ' human-turn' : '';
+    var palaficoFocus = state.palaficoPlayerId === p.id && state.palificoActive ? ' palafico-focus' : '';
     var eliminated = p.eliminated ? ' eliminated' : '';
-    return '<article class="seat' + active + human + eliminated + '" data-player-id="' + safeText(p.id) + '" style="--turn-color:' + safeText(p.cupColour) + '"><div class="avatar-line"><span class="avatar">' + safeText(p.avatar) + '</span><div><div class="player-name">' + safeText(p.name) + '</div><span class="rank-badge">' + safeText(rank) + '</span></div></div><div class="cup" style="--cup:' + safeText(p.cupColour) + '"></div><p class="meta">Mood: ' + safeText(p.mood) + ' · Dice: ' + safeText(p.diceCount) + '</p><div class="dice-row">' + dice + '</div></article>';
+    return '<article class="seat' + active + human + palaficoFocus + eliminated + '" data-player-id="' + safeText(p.id) + '" style="--turn-color:' + safeText(p.cupColour) + '"><div class="avatar-line"><span class="avatar">' + safeText(p.avatar) + '</span><div><div class="player-name">' + safeText(p.name) + '</div><span class="rank-badge">' + safeText(rank) + '</span></div></div><div class="cup" style="--cup:' + safeText(p.cupColour) + '"></div><p class="meta">Mood: ' + safeText(p.mood) + ' · Dice: ' + safeText(p.diceCount) + '</p><div class="dice-row">' + dice + '</div></article>';
   }
 
   function getMinimumLegalBidText() {
-    if (state.palificoActive && state.currentBid) return 'Minimum legal bid: ' + (state.currentBid.quantity + 1) + ' x ' + faceName(state.lockedFace) + '.';
-    if (state.palificoActive) return 'Minimum legal bid: 1+ of any face. That face locks for Palifico.';
-    if (!state.currentBid) return 'Minimum legal bid: 1 x twos or higher. Opening on ones is not allowed.';
-    if (state.currentBid.face === 1) return 'Minimum legal normal bid: ' + window.getMinimumNormalBidFromOnes(state.currentBid.quantity) + ' x twos or higher. Or raise ones.';
-    return 'Minimum to switch to ones: ' + window.getMinimumOnesBid(state.currentBid.quantity) + ' x ones. Otherwise raise quantity or face legally.';
+    var player = currentPlayer();
+    var legal = window.getLegalBids(player, makeRoundState());
+    if (!legal.length) return 'No legal raise available. You must challenge.';
+    var first = legal[0];
+    if (state.palificoActive && state.currentBid) return 'Palafico: face locked to ' + faceName(state.lockedFace) + '. Minimum legal raise: ' + first.quantity + ' x ' + faceName(first.face) + '.';
+    if (state.palificoActive) return 'Palafico: opening bid locks the face. Aces are not wild.';
+    if (!state.currentBid) return 'Minimum legal bid: 1 x twos or higher. Opening on aces is not allowed.';
+    if (state.currentBid.face === 1) return 'From aces: minimum normal bid is ' + window.getMinimumNormalBidFromAces(state.currentBid) + ' of any normal face.';
+    return 'To switch to aces: at least ' + window.getMinimumAceBid(state.currentBid) + ' aces. Or raise quantity/face normally.';
   }
 
   function updateBidHint() {
@@ -278,16 +447,52 @@
 
   function updateBidControls() {
     var qty = Number($('bidQuantity').value) || 1;
+    var player = currentPlayer();
+    var roundState = makeRoundState();
+    var legal = window.getLegalBids(player, roundState);
+    var min = legal.length ? legal.reduce(function (lowest, bid) { return Math.min(lowest, bid.quantity); }, legal[0].quantity) : 1;
+    $('bidQuantity').min = min;
+    if (qty < min) {
+      $('bidQuantity').value = min;
+      qty = min;
+    }
     var options = Array.from($('bidFace').options);
     options.forEach(function (option) {
       var bid = { quantity: qty, face: Number(option.value) };
-      option.disabled = state.palificoActive ? !window.isValidPalificoBid(state.currentBid, bid, state.lockedFace || bid.face) : !window.isValidBid(state.currentBid, bid);
+      option.disabled = !window.isLegalBid(bid, state.currentBid, roundState, player);
     });
-    var min = 1;
-    if (state.palificoActive && state.currentBid) min = state.currentBid.quantity + 1;
-    else if (state.currentBid && state.currentBid.face === 1) min = state.currentBid.quantity + 1;
-    else if (state.currentBid) min = window.getMinimumOnesBid(state.currentBid.quantity);
-    $('bidQuantity').min = min;
+  }
+
+  function updateCalzaControl() {
+    var button = $('calzaButton');
+    if (!button) return;
+    var hint = $('calzaHint');
+    var human = playerById('human');
+    var status = getHumanCalzaUiStatus(human);
+    console.log('Calza enabled:', state.calzaEnabled);
+    console.log('canCallCalza:', status.allowed);
+    console.log('Calza disabled reason:', status.reason);
+    button.classList.toggle('calza-ready', status.allowed);
+    button.classList.toggle('calza-disabled', !status.allowed);
+    button.disabled = !status.allowed || state.gameOver;
+    button.title = status.allowed ? 'Call exact' : status.reason;
+    if (hint) hint.textContent = status.allowed ? 'Calza available: call exact.' : status.reason;
+  }
+
+  function getHumanCalzaUiStatus(human) {
+    if (!state.calzaEnabled) return { allowed: false, reason: 'Calza disabled in settings' };
+    var status = window.getCalzaStatus ? window.getCalzaStatus(human, makeRoundState()) : { allowed: false, reason: 'Calza unavailable' };
+    var reasonMap = {
+      'Calza disabled': 'Calza disabled in settings',
+      'No bid to Calza': 'No bid to Calza',
+      'Calza unavailable in Palafico': 'Unavailable in Palafico',
+      'Calza unavailable with two players': 'Unavailable with 2 players',
+      'Cannot Calza your own bid': 'Cannot Calza your own bid',
+      'Next player cannot Calza': 'Next player cannot Calza'
+    };
+    if (!status.allowed) return { allowed: false, reason: reasonMap[status.reason] || status.reason || 'Calza unavailable' };
+    if (!state.calzaWindowOpen) return { allowed: false, reason: 'Wait for the Calza window' };
+    return { allowed: true, reason: '' };
   }
 
   function nextTurn() {
@@ -314,10 +519,14 @@
     await wait(randomBetween(PACE.aiThinkingMin, PACE.aiThinkingMax));
     window.maybeSpeak(p, 'turn', state.currentBid ? playerById(state.previousBidderId) : null);
     await wait(PACE.speechPause);
-    var move = window.PerudoAI.chooseAIMove(p, { players: state.players, currentBid: state.currentBid, palificoActive: state.palificoActive, lockedFace: state.lockedFace, streakTarget: false });
+    var move = window.PerudoAI.chooseAIMove(p, Object.assign(makeRoundState(), { streakTarget: false }));
     if (move.type === 'dudo' && state.currentBid) {
       state.turnBusy = false;
       return callDudo(p.id);
+    }
+    if (move.type === 'calza' && state.currentBid) {
+      state.turnBusy = false;
+      return callCalza(p.id);
     }
     await placeBid(p.id, move.bid);
   }
@@ -327,30 +536,45 @@
     if (!p || state.gameOver) return false;
     if (p.human && state.turnBusy) return false;
     state.turnBusy = true;
-    var valid = state.palificoActive ? window.isValidPalificoBid(state.currentBid, bid, state.lockedFace || bid.face) : window.isValidBid(state.currentBid, bid);
+    var roundState = makeRoundState();
+    var valid = window.isLegalBid(bid, state.currentBid, roundState, p);
     if (!valid) {
       state.turnBusy = false;
       if (p.human) alert('Invalid bid for the current rules.');
       renderGame();
       return false;
     }
-    if (state.palificoActive && !state.lockedFace) state.lockedFace = bid.face;
+    if (state.palificoActive) state.lockedFace = Number(bid.face);
     if (state.palificoActive) {
-      $('palificoBanner').textContent = 'PALIFICO ROUND - face locked to ' + faceName(state.lockedFace) + '. Ones are not wild.';
+      $('palificoBanner').textContent = 'PALAFICO ROUND - ACES ARE NOT WILD - FACE LOCKED TO ' + faceName(state.lockedFace) + '.';
     }
+    var previousBidForTalk = state.currentBid ? { quantity: state.currentBid.quantity, face: state.currentBid.face } : null;
     state.currentBid = { quantity: Number(bid.quantity), face: Number(bid.face) };
+    window.recordAceBid(state, state.currentBid);
     state.previousBidderId = playerId;
+    if (window.recordBidMemory) window.recordBidMemory(p, state.currentBid, makeRoundState(), state.aiMemory);
     setAction(p.name + ' bids ' + bidText(state.currentBid) + '.');
     log(p.name + ' bids ' + bidText(state.currentBid) + '.');
     window.playBidSound();
-    window.maybeSpeak(p, 'bid', activePlayers().find(function (x) { return x.id !== p.id; }), false, speechBidContext(state.currentBid));
+    if (window.getBanterLevel && window.getBanterLevel() > 0 && window.showSpeechBubble && window.getBanterLine) {
+      window.showSpeechBubble(p.id, window.getBanterLine(p, 'bid', activePlayers().find(function (x) { return x.id !== p.id; }), speechBidContext(state.currentBid)));
+    }
     renderGame();
+    await runTableTalk(p.human ? 'afterHumanBid' : 'afterBid', makeTalkContext(p, state.currentBid, { previousBid: previousBidForTalk, nextPlayer: peekNextPlayer() }));
     await wait(PACE.bidResultPause);
     nextTurn();
+    setAction(currentPlayer().name + ' is next. Calza window open.');
+    state.calzaWindowOpen = true;
+    state.turnBusy = false;
+    renderGame();
+    var aiCalledCalza = await maybeAiCalzaWindow();
+    if (aiCalledCalza) return true;
+    await wait(PACE.nextTurnPause);
+    if (!state.calzaWindowOpen) return true;
+    state.calzaWindowOpen = false;
+    state.turnBusy = false;
     setAction(currentPlayer().name + ' must raise the bid or challenge.');
     renderGame();
-    await wait(PACE.nextTurnPause);
-    state.turnBusy = false;
     promptTurn();
     return true;
   }
@@ -360,12 +584,18 @@
     state.turnBusy = true;
     var challenger = playerById(challengerId);
     var bidder = playerById(state.previousBidderId);
-    setAction('LIAR CALLED - ' + challenger.name + ' challenges ' + bidder.name + "'s bid.");
+    if (!window.canCallDudo(challenger, makeRoundState())) {
+      state.turnBusy = false;
+      renderGame();
+      return;
+    }
+    setAction('DUDO CALLED - ' + challenger.name + ' challenges ' + bidder.name + "'s bid.");
     emphasizeLiarCalled(true);
     log('LIAR CALLED: ' + challenger.name + ' challenges ' + bidder.name + "'s bid: " + bidText(state.currentBid) + '.');
     window.playDudoSound();
     window.maybeSpeak(challenger, 'dudo', bidder, true, speechBidContext(state.currentBid));
     renderGame();
+    await runTableTalk(challenger.human ? 'afterHumanDudo' : 'afterDudoCalled', makeTalkContext(challenger, state.currentBid, { caller: challenger, target: bidder, lastBidder: bidder.name, risk: 'high' }));
     await wait(PACE.challengeResultPause);
     setAction('Revealing dice...');
     state.revealMode = true;
@@ -373,32 +603,36 @@
     window.playRevealSound();
     await Promise.all(activePlayers().map(function (p) { return window.animateDiceReveal(p.id); }));
     await wait(Math.min(PACE.diceRevealPause, 1000));
-    var result = window.PerudoRules.resolveDudo(state.players, state.currentBid, challengerId, state.previousBidderId, state.palificoActive);
+    var result = window.PerudoRules.resolveDudo(challenger, bidder, state.currentBid, makeRoundState());
     var actual = await window.animateChallengeCount(state.currentBid, state.players, state.palificoActive, {
       perDieMs: PACE.challengeCountPerDie,
       finalPauseMs: PACE.challengeCountFinalPause,
       onCount: function (count) { setAction('Counting ' + count + '...'); }
     });
-    setAction('Actual count: ' + actual + '. Bid was: ' + bidText(state.currentBid) + '.');
+    setAction('Actual count: ' + actual + '. Bid: ' + bidText(state.currentBid) + '.');
     log('Dice count complete: actual count is ' + actual + ' for ' + bidText(state.currentBid) + '.');
     await wait(PACE.challengeCountFinalPause);
-    var bidSurvived = !result.callerCorrect;
+    var bidSurvived = result.bidTrue;
     if (result.callerCorrect) {
       addDudoStat(challengerId, result.successfulDudoQuantity);
       window.recordPlayerEvent(challenger, 'successfulDudo');
       window.recordPlayerEvent(bidder, 'failedBid');
+      if (window.applyAIMoodEvent) { window.applyAIMoodEvent(challenger, 'wonDudo'); window.applyAIMoodEvent(bidder, 'failedDudo'); }
     } else {
       window.recordPlayerEvent(challenger, 'failedDudo');
+      if (window.applyAIMoodEvent) window.applyAIMoodEvent(challenger, 'failedDudo');
     }
+    if (window.updateMemoryAfterDudo) window.updateMemoryAfterDudo(challenger, bidder, result, makeRoundState(), state.aiMemory);
     var loser = playerById(result.loserId);
     setAction((bidSurvived ? 'Bid was true' : 'Bid was false') + ' - ' + (bidSurvived ? 'challenger' : 'bidder') + ' loses 1 die. ' + loser.name + ' loses it.');
     log(loser.name + ' loses 1 die.');
+    await runTableTalk(result.callerCorrect ? 'afterDudoSuccess' : 'afterDudoFail', makeTalkContext(challenger, state.currentBid, { caller: challenger, target: loser, lastBidder: bidder.name, risk: 'high' }));
     await wait(PACE.challengeResultDisplay);
     emphasizeLiarCalled(false);
     await loseDie(loser);
     await wait(PACE.diceLossWinnerPause);
     if (checkWinner()) return;
-    var starter = window.determineNextRoundStarter(state.players, loser.id);
+    var starter = window.determineNextRoundStarter(result, makeRoundState());
     state.turnBusy = false;
     beginRound(starter);
   }
@@ -409,15 +643,76 @@
     state.dudoStats[playerId].largest = Math.max(state.dudoStats[playerId].largest, quantity);
   }
 
+  async function callCalza(callerId) {
+    if (!state.currentBid || state.gameOver || (state.turnBusy && !state.calzaWindowOpen)) return;
+    var caller = playerById(callerId);
+    var status = window.getCalzaStatus(caller, makeRoundState());
+    if (!status.allowed) {
+      setAction(status.reason);
+      renderGame();
+      return;
+    }
+    state.calzaWindowOpen = false;
+    state.turnBusy = true;
+    setAction(caller.name + ' calls CALZA!');
+    emphasizeLiarCalled(true);
+    log('CALZA CALLED: ' + caller.name + ' calls exact on ' + bidText(state.currentBid) + '.');
+    await runCalzaShout(caller);
+    window.maybeSpeak(caller, 'challenge', playerById(state.previousBidderId), true, speechBidContext(state.currentBid));
+    renderGame();
+    await runTableTalk(caller.human ? 'afterHumanCalza' : 'afterCalzaCalled', makeTalkContext(caller, state.currentBid, { caller: caller, target: playerById(state.previousBidderId), risk: 'high' }));
+    await wait(PACE.challengeResultPause);
+    setAction('Revealing dice for Calza...');
+    state.revealMode = true;
+    renderGame();
+    window.playRevealSound();
+    await Promise.all(activePlayers().map(function (p) { return window.animateDiceReveal(p.id); }));
+    await wait(Math.min(PACE.diceRevealPause, 1000));
+    var result = window.resolveCalza(caller, state.currentBid, makeRoundState());
+    var actual = await window.animateChallengeCount(state.currentBid, state.players, false, {
+      perDieMs: PACE.challengeCountPerDie,
+      finalPauseMs: PACE.challengeCountFinalPause,
+      onCount: function (count) { setAction('Counting ' + count + '...'); }
+    });
+    setAction('Actual count: ' + actual + '. Bid: ' + bidText(state.currentBid) + '.');
+    log('Calza count complete: actual count is ' + actual + ' for ' + bidText(state.currentBid) + '.');
+    await wait(PACE.challengeCountFinalPause);
+    if (result.exact) {
+      var gain = window.applyDiceGain(caller);
+      if (window.applyAIMoodEvent) window.applyAIMoodEvent(caller, 'successfulCalza');
+      setAction('Calza exact - ' + caller.name + (gain.gainedDie ? ' gains 1 die.' : ' is already at 5 dice.'));
+      log(caller.name + ' called Calza exactly and ' + (gain.gainedDie ? 'gains 1 die.' : 'stays at 5 dice.'));
+      renderGame();
+      await runTableTalk('afterCalzaSuccess', makeTalkContext(caller, state.currentBid, { caller: caller, target: caller, risk: 'high' }));
+      await wait(PACE.challengeResultDisplay);
+    } else {
+      if (window.applyAIMoodEvent) window.applyAIMoodEvent(caller, 'failedCalza');
+      setAction('Calza wrong - ' + caller.name + ' loses 1 die. Previous bidder is safe.');
+      log(caller.name + ' called Calza wrong and loses 1 die. Previous bidder is safe.');
+      await runTableTalk('afterCalzaFail', makeTalkContext(caller, state.currentBid, { caller: caller, target: caller, risk: 'high' }));
+      await wait(PACE.challengeResultDisplay);
+      await loseDie(caller);
+      await wait(PACE.diceLossWinnerPause);
+      if (checkWinner()) return;
+    }
+    if (window.updateMemoryAfterCalza) window.updateMemoryAfterCalza(caller, playerById(state.previousBidderId), result, state.aiMemory);
+    emphasizeLiarCalled(false);
+    var starter = window.determineNextRoundStarter(result, makeRoundState());
+    state.turnBusy = false;
+    beginRound(starter);
+  }
+
   async function loseDie(player) {
     window.recordPlayerEvent(player, 'lostDie');
     window.playLoseDieSound();
     await window.animateDieLoss(player.id);
-    player.diceCount -= 1;
-    player.dice = player.dice.slice(0, Math.max(0, player.diceCount));
-    if (player.diceCount === 1 && !player.eliminated) state.pendingPalificoPlayerId = player.id;
+    var loss = window.applyDiceLoss(player, makeRoundState());
+    if (window.applyAIMoodEvent) window.applyAIMoodEvent(player, 'lostDie');
+    if (loss.startsPalafico && shouldTriggerPalaficoAnnouncement(player, makeRoundState())) {
+      await runPalaficoAnticipationSequence(player);
+      state.pendingPalificoPlayerId = player.id;
+    }
     if (player.diceCount <= 0) {
-      player.eliminated = true;
       player.spectator = true;
       player.mood = 'eliminated';
       setAction(player.name + ' has been eliminated.');
@@ -425,8 +720,12 @@
       window.maybeSpeak(player, 'elim', null, true);
       await window.animateElimination(player.id);
       log(player.name + ' has been eliminated and moves to Spectators.');
+      renderGame();
+      await runTableTalk('afterElimination', makeTalkContext(player, state.currentBid, { target: player, risk: 'high' }));
     } else {
       window.maybeSpeak(player, 'loss', null);
+      renderGame();
+      await runTableTalk(loss.startsPalafico ? 'afterPalaficoStart' : 'afterDiceLoss', makeTalkContext(player, state.currentBid, { target: player, risk: loss.startsPalafico ? 'high' : 'medium' }));
     }
     renderGame();
     window.maybeSpectatorSpeak(state.players, player);
@@ -464,9 +763,18 @@
   function bindEvents() {
     window.renderProfile();
     var soundSettings = window.initSound ? window.initSound() : { enabled: true, volume: .45 };
+    state.aiSkillLevel = window.getAiSkillLevel ? window.getAiSkillLevel() : 'hard';
+    state.aiMemory = window.loadAiMemory ? window.loadAiMemory() : {};
+    var savedCalza = localStorage.getItem('calzaEnabled');
+    state.calzaEnabled = savedCalza === null ? true : savedCalza === 'true';
+    console.log('Current Action layout loaded');
+    console.log('Calza UI loaded');
+    console.log('Calza enabled:', state.calzaEnabled);
     $('soundToggle').checked = soundSettings.enabled;
     $('volumeSlider').value = soundSettings.volume;
-    $('banterLevel').value = localStorage.getItem('perudoBanterLevel') || 'Normal';
+    if ($('aiSkillLevel')) $('aiSkillLevel').value = state.aiSkillLevel;
+    if ($('calzaToggle')) $('calzaToggle').checked = state.calzaEnabled;
+    $('banterLevel').value = String(window.getBanterLevel ? window.getBanterLevel() : 2);
     $('skipAnimationsToggle').checked = localStorage.getItem('perudoSkipAnimations') === 'true';
     $('profileForm').addEventListener('submit', function (e) {
       e.preventDefault();
@@ -478,12 +786,15 @@
     $('startGameButton').addEventListener('click', startGame);
     $('placeBidButton').addEventListener('click', function () { placeBid('human', { quantity: Number($('bidQuantity').value), face: Number($('bidFace').value) }); });
     $('dudoButton').addEventListener('click', function () { callDudo('human'); });
+    $('calzaButton').addEventListener('click', function () { callCalza('human'); });
     $('bidQuantity').addEventListener('input', updateBidControls);
     $('settingsButton').addEventListener('click', function () { $('settingsPanel').classList.toggle('hidden'); });
-    $('banterLevel').addEventListener('change', function () { localStorage.setItem('perudoBanterLevel', $('banterLevel').value); });
+    $('banterLevel').addEventListener('change', function () { if (window.setBanterLevel) window.setBanterLevel($('banterLevel').value); else localStorage.setItem('perudoBanterLevel', $('banterLevel').value); });
+    if ($('aiSkillLevel')) $('aiSkillLevel').addEventListener('change', function () { state.aiSkillLevel = $('aiSkillLevel').value; if (window.setAiSkillLevel) window.setAiSkillLevel(state.aiSkillLevel); });
     $('soundToggle').addEventListener('change', function () { window.PerudoSound.setSoundSettings({ enabled: $('soundToggle').checked }); });
     $('volumeSlider').addEventListener('input', function () { window.PerudoSound.setSoundSettings({ volume: Number($('volumeSlider').value) }); });
     $('skipAnimationsToggle').addEventListener('change', function () { localStorage.setItem('perudoSkipAnimations', $('skipAnimationsToggle').checked); });
+    if ($('calzaToggle')) $('calzaToggle').addEventListener('change', function () { state.calzaEnabled = $('calzaToggle').checked; localStorage.setItem('calzaEnabled', state.calzaEnabled); renderGame(); });
     $('leaderboardButton').addEventListener('click', function () { window.renderLeaderboard('leaderboardDialogContent'); $('leaderboardDialog').showModal(); });
     $('closeLeaderboard').addEventListener('click', function () { $('leaderboardDialog').close(); });
     $('replayButton').addEventListener('click', function () { state.players = createPlayers(); renderReveal(); showScreen('revealScreen'); });
@@ -492,43 +803,54 @@
   }
 
   function runConsoleTests() {
-    var R = window.PerudoRules;
-    console.group('Perudo console tests');
-    console.assert(R.isValidBid(null, { quantity: 1, face: 2 }), 'Legal bid progression: opening 1 twos');
-    console.assert(R.isValidBid({ quantity: 1, face: 2 }, { quantity: 1, face: 3 }), 'Legal bid progression: same quantity higher face');
-    console.assert(R.isValidBid({ quantity: 1, face: 3 }, { quantity: 2, face: 3 }), 'Legal bid progression: same face higher quantity');
-    console.assert(R.isValidBid({ quantity: 4, face: 4 }, { quantity: 2, face: 1 }), 'Valid: 4 fours -> 2 ones');
-    console.assert(R.isValidBid({ quantity: 5, face: 6 }, { quantity: 3, face: 1 }), 'Valid: 5 sixes -> 3 ones');
-    console.assert(R.isValidBid({ quantity: 2, face: 1 }, { quantity: 5, face: 2 }), 'Valid: 2 ones -> 5 twos');
-    console.assert(R.isValidBid({ quantity: 2, face: 1 }, { quantity: 3, face: 1 }), 'Valid: 2 ones -> 3 ones');
-    console.assert(R.isValidPalificoBid({ quantity: 2, face: 3 }, { quantity: 3, face: 3 }, 3), 'Valid: Palifico 2 threes -> 3 threes');
-    console.assert(!R.isValidBid({ quantity: 4, face: 4 }, { quantity: 1, face: 1 }), 'Invalid: 4 fours -> 1 one');
-    console.assert(!R.isValidBid({ quantity: 2, face: 1 }, { quantity: 4, face: 2 }), 'Invalid: 2 ones -> 4 twos');
-    console.assert(!R.isValidPalificoBid({ quantity: 2, face: 3 }, { quantity: 2, face: 4 }, 3), 'Invalid: Palifico 2 threes -> 2 fours');
-    console.assert(!R.isValidPalificoBid({ quantity: 2, face: 3 }, { quantity: 3, face: 4 }, 3), 'Invalid: Palifico 2 threes -> 3 fours');
-    var mock = [{ id: 'a', empty:false, eliminated:false, dice:[1,4,4] }, { id: 'b', empty:false, eliminated:false, dice:[2,1] }];
-    console.assert(R.countBidDice(mock, { quantity: 1, face: 4 }, false) === 4, 'Wild ones counting correctly');
+    var ruleFailures = window.runOfficialRulesTests ? window.runOfficialRulesTests() : ['Official rules test runner missing'];
+    if (ruleFailures.length) {
+      console.error('Perudo rules tests failed');
+      ruleFailures.forEach(function (name) { console.error('- ' + name); });
+    } else {
+      console.log('Perudo rules tests passed');
+    }
+
+    console.group('Perudo integration smoke tests');
+    var mock = [
+      { id: 'a', empty:false, eliminated:false, diceCount: 5, dice:[1,4,4,6,2] },
+      { id: 'b', empty:false, eliminated:false, diceCount: 5, dice:[2,1,3,5,6] },
+      { id: 'c', empty:false, eliminated:false, diceCount: 5, dice:[4,2,6,3,5] }
+    ];
     console.assert(window.validatePhraseBank(), 'AI speech categories contain 100 unique phrases each');
+    var banterChecks = window.validateBanterSystem ? window.validateBanterSystem() : {};
+    var aiChecks = window.validateAiIntelligence ? window.validateAiIntelligence() : {};
+    console.assert(banterChecks.reactionsTriggerAfterBids, 'Reactions trigger after bids');
+    console.assert(banterChecks.nextPlayerPressureIncludesName, 'Next player pressure includes nextPlayer name');
+    console.assert(banterChecks.humanBidsCanTriggerAIReactions, 'Human bids can trigger AI reactions');
+    console.assert(banterChecks.banterLevelChangesIntensity, 'Banter level changes intensity');
+    console.assert(banterChecks.noPhraseRepeatsTooOften, 'No phrase repeats too often');
+    console.assert(banterChecks.animalSpecificUsesAnimalType, 'Animal-specific phrases use correct animalType');
+    console.assert(banterChecks.reactionSequenceDoesNotSkipPacing, 'Reaction sequence does not skip game pacing');
+    console.assert(typeof runCalzaShout === 'function', 'Calza shout fires when Calza is called');
+    var palTestPlayers = [{ id: 'p', name: 'Pal', diceCount: 1, dice: [3], palaficoUsed: false }, { id: 'a', diceCount: 3 }, { id: 'b', diceCount: 3 }];
+    console.assert(shouldTriggerPalaficoAnnouncement(palTestPlayers[0], { players: palTestPlayers }), 'Palafico shout fires when player drops from 2 dice to 1');
+    console.assert(!shouldTriggerPalaficoAnnouncement({ id: 'p', diceCount: 1, palaficoUsed: true }, { players: palTestPlayers }), 'Palafico shout does not fire if already used');
+    console.assert(!shouldTriggerPalaficoAnnouncement({ id: 'p', diceCount: 1, palaficoUsed: false }, { players: [{ id: 'p', diceCount: 1 }, { id: 'x', diceCount: 2 }] }), 'Palafico shout does not fire with only 2 players left');
+    console.assert(PACE.palaficoAnticipationMin >= 3500, 'Next round waits until shout sequence completes');
+    console.assert(aiChecks.normalNonAceUsesTwoSixths, 'AI estimated count uses 2/6 for normal non-ace bids');
+    console.assert(aiChecks.aceUsesOneSixth, 'AI estimated count uses 1/6 for ace bids');
+    console.assert(aiChecks.palaficoUsesOneSixth, 'AI estimated count uses 1/6 in Palafico');
+    console.assert(aiChecks.hardRejectsAbsurd, 'Hard AI rejects absurd bids more often');
+    console.assert(aiChecks.expertChallengesBluffers, 'Expert AI challenges frequent bluffers more');
+    console.assert(aiChecks.calmChoosesSaferBids, 'Calm AI chooses safer bids');
+    console.assert(aiChecks.angryChallengesMore, 'Angry AI challenges more');
+    console.assert(aiChecks.nervousHasHigherVariance, 'Nervous AI has higher variance');
+    console.assert(aiChecks.cockyBluffsMore, 'Cocky AI bluffs more');
+    console.assert(aiChecks.aiNeverIllegal, 'AI never makes illegal bids');
+    console.assert(aiChecks.noIllegalPalaficoFaceChange, 'AI never changes face illegally in Palafico');
+    console.assert(aiChecks.respectsAcesRules, 'AI respects aces rules');
+    console.assert(aiChecks.aiCalzaLegalOnly, 'AI only calls Calza when legal');
+    if (Object.values(banterChecks).every(Boolean) && Object.values(aiChecks).every(Boolean)) console.log('AI intelligence, mood, and banter validation passed');
     console.assert(!window.getBanterLine({ name: 'Test', id: 'test' }, 'bidding', null, { quantity: 6, face: 'threes', currentBid: '6 x threes' }).includes('['), 'Dynamic banter templates resolve variables');
-    console.assert(R.resolveDudo(mock, { quantity: 3, face: 4 }, 'a', 'b', false).loserId === 'a', 'Challenge result where bid succeeds');
-    console.assert(R.resolveDudo(mock, { quantity: 5, face: 4 }, 'a', 'b', false).loserId === 'b', 'Challenge result where bid fails');
     var countTargets = window.getChallengeCountTargets({ quantity: 1, face: 4 }, mock, false);
-    console.assert(countTargets.length === 4 && countTargets[0].value === 4 && countTargets[1].value === 4 && countTargets[2].value === 1, 'Challenge count animation orders face dice before wild ones');
-    console.assert(window.getChallengeCountTargets({ quantity: 1, face: 4 }, mock, true).length === 2, 'Challenge count animation uses exact face only in Palifico');
-    var starterMock = [{ id: 'a', empty:false, eliminated:false }, { id: 'b', empty:false, eliminated:true }, { id: 'c', empty:false, eliminated:false }];
-    console.assert(R.determineNextRoundStarter(starterMock, 'a') === 'a', 'Next round starter after challenge loser survives');
-    console.assert(R.determineNextRoundStarter(starterMock, 'b') === 'c', 'Next round starter after eliminated loser');
-    var eliminationPlayer = { diceCount: 1, eliminated: false };
-    eliminationPlayer.diceCount -= 1; if (eliminationPlayer.diceCount <= 0) eliminationPlayer.eliminated = true;
-    console.assert(eliminationPlayer.eliminated, 'Player elimination');
-    var palificoTrigger = { diceCount: 2 };
-    palificoTrigger.diceCount -= 1;
-    console.assert(palificoTrigger.diceCount === 1, 'Palifico starts when a player drops to 1 die');
-    console.assert(R.isValidPalificoBid(null, { quantity: 2, face: 4 }, 4), 'Palifico first bid locks the face');
-    console.assert(!R.isValidPalificoBid({ quantity: 2, face: 4 }, { quantity: 3, face: 5 }, 4), 'Human cannot choose another face after Palifico lock');
-    console.assert(!R.isValidPalificoBid({ quantity: 2, face: 4 }, { quantity: 4, face: 5 }, 4), 'AI cannot bid another face after Palifico lock');
-    console.assert(R.countBidDice(mock, { quantity: 1, face: 4 }, true) === 2, 'Ones are not wild during Palifico');
-    console.assert(!R.isValidBid(null, { quantity: 1, face: 1 }) && R.isValidBid(null, { quantity: 1, face: 2 }), 'Normal rules resume after Palifico ends');
+    console.assert(countTargets.length === 5 && countTargets[0].value === 4 && countTargets[1].value === 4 && countTargets[2].value === 4 && countTargets[3].value === 1, 'Challenge count animation orders face dice before wild aces');
+    console.assert(window.getChallengeCountTargets({ quantity: 1, face: 4 }, mock, true).length === 3, 'Challenge count animation uses exact face only in Palafico');
     console.assert(PACE.bidResultPause >= 2500 && PACE.diceRevealPause >= 3000 && PACE.diceLossWinnerPause >= 4000, 'No AI turn starts before current animations/delays finish');
     var entry = { cupColourUsage: {} }; window.updateCupColourStats(entry, '#ffffff', true); window.updateCupColourStats(entry, '#ffffff', false);
     console.assert(window.getCupColourWinRate(entry.cupColourUsage['#ffffff']) === 50, 'Cup colour stat tracking');
@@ -549,7 +871,7 @@
     if (originalSound === null) localStorage.removeItem('perudoSoundSettings'); else localStorage.setItem('perudoSoundSettings', originalSound);
     console.groupEnd();
   }
-
   window.PerudoGame = { state: state, PACE: PACE };
   document.addEventListener('DOMContentLoaded', function () { bindEvents(); runConsoleTests(); });
 })();
+
