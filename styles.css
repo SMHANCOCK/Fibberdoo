@@ -175,10 +175,11 @@ button:hover { transform: translateY(-1px); }
   box-shadow: 0 16px 28px rgba(0,0,0,.35);
   animation: shoutPop 2.7s ease forwards;
 }
-.palafico-focus {
+.palafico-highlight {
   outline: 5px solid #ffe26d;
-  box-shadow: 0 0 32px rgba(255,226,109,.9), inset 0 0 24px rgba(255,226,109,.22);
-  animation: palaficoPulse 1.15s ease-in-out infinite;
+  border-color: #f5d76e;
+  box-shadow: 0 0 18px rgba(255, 215, 90, .9), inset 0 0 18px rgba(255, 215, 90, .18);
+  animation: none;
 }
 .palafico-round-banner {
   margin: 0 0 16px;
@@ -246,7 +247,6 @@ dialog { border: 0; border-radius: 24px; padding: 18px; max-width: min(1000px, 9
   78% { opacity: 1; }
   100% { opacity: 0; transform: translateX(-50%) translateY(-12px) scale(.92); }
 }
-@keyframes palaficoPulse { 50% { transform: translateY(-4px) scale(1.02); } }
 @keyframes bannerDrop {
   0% { opacity: 0; transform: translateY(-14px) scale(.98); }
   12%, 82% { opacity: 1; transform: translateY(0) scale(1); }

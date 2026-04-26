@@ -18,7 +18,15 @@
     palaficoAnticipationMax: 5000,
     palaficoRoundBanner: 3000,
     roundStartPause: 1400,
-    nextTurnPause: 900
+    nextTurnPause: 900,
+    slowTurnFirstTaunt: 8000,
+    slowTurnSecondTaunt: 14000,
+    slowTurnThirdTaunt: 22000,
+    slowTurnTypingGrace: 3000,
+    slowAiTurnChance: 0.2,
+    slowAiThinkDelay: 8000,
+    slowAiFirstTauntDelay: 2600,
+    slowAiSecondTauntDelay: 5600
   };
 
   var state = {
@@ -41,6 +49,13 @@
     gameOver: false,
     turnBusy: false,
     calzaWindowOpen: false,
+    openingBanterDone: false,
+    lastNewPlayerMoment: {},
+    slowTurn: { active: false, timers: [], fired: {}, turnKey: '', recentSpeakers: [], lastQuantityInputAt: 0 },
+    slowTurnMoodBackups: {},
+    slowAiThisRound: null,
+    slowAiTurnUsed: false,
+    tableTension: 0,
     quantityInputTouched: false,
     bidInputContextKey: '',
     actionMessage: 'Waiting for the round to begin...'
@@ -84,7 +99,8 @@
       aceBidsThisRound: state.aceBidsThisRound,
       calzaEnabled: state.calzaEnabled,
       aiSkillLevel: state.aiSkillLevel,
-      aiMemory: state.aiMemory
+      aiMemory: state.aiMemory,
+      tableTension: state.tableTension
     };
   }
 
@@ -150,11 +166,8 @@
     if (panel && panel.parentNode) panel.parentNode.insertBefore(banner, panel);
     setAction('PALAFICO ROUND - ' + player.name + ' is Palafico. Face will lock after the first bid.');
     renderGame();
-    var seat = document.querySelector('[data-player-id="' + player.id + '"]');
-    if (seat) seat.classList.add('palafico-focus');
     await wait(PACE.palaficoRoundBanner);
     if (banner.parentNode) banner.remove();
-    if (seat) seat.classList.remove('palafico-focus');
     return true;
   }
 
@@ -177,6 +190,278 @@
       if (i < reactions.length - 1) await wait(randomBetween(PACE.tableReactionMinGap, PACE.tableReactionMaxGap));
     }
     await wait(PACE.tableReactionMinGap);
+  }
+
+  async function runSpeechSequence(lines, actionText) {
+    if (!lines || !lines.length || !window.showSpeechBubble) return false;
+    if (actionText) setAction(actionText);
+    for (var i = 0; i < lines.length; i += 1) {
+      if (lines[i] && lines[i].speaker && lines[i].line) window.showSpeechBubble(lines[i].speaker.id, lines[i].line);
+      if (i < lines.length - 1) await wait(randomBetween(PACE.tableReactionMinGap, PACE.tableReactionMaxGap));
+    }
+    await wait(PACE.tableReactionMinGap);
+    return true;
+  }
+
+  async function runOpeningBanterIfNeeded() {
+    if (state.openingBanterDone || state.roundNumber !== 1 || !window.getOpeningBanter) return false;
+    state.openingBanterDone = true;
+    var human = playerById('human');
+    var lines = window.getOpeningBanter(state.players, human);
+    return runSpeechSequence(lines, 'The table sizes up ' + (human && human.name || 'the new player') + '...');
+  }
+
+  async function runNewPlayerMoment(event, player, context) {
+    if (!window.getNewPlayerReactions || !player || !player.human || !window.isNewPlayer || !window.isNewPlayer(player)) return false;
+    var now = Date.now();
+    if (state.lastNewPlayerMoment[player.id] && now - state.lastNewPlayerMoment[player.id] < 4500) return false;
+    state.lastNewPlayerMoment[player.id] = now;
+    var lines = window.getNewPlayerReactions(event, state.players, player, context || {});
+    return runSpeechSequence(lines);
+  }
+
+  function isModalBlockingSlowTurn() {
+    var settings = $('settingsPanel');
+    var leaderboard = $('leaderboardDialog');
+    return !!((settings && !settings.classList.contains('hidden')) || (leaderboard && leaderboard.open));
+  }
+
+  function isSlowTurnEligible() {
+    var p = currentPlayer();
+    return !!(p && p.human && !state.gameOver && !state.turnBusy && !state.revealMode && !state.calzaWindowOpen && !isModalBlockingSlowTurn() && !(typeof document !== 'undefined' && document.hidden));
+  }
+
+  function shouldDelaySlowTurnForTyping() {
+    return Date.now() - (state.slowTurn.lastQuantityInputAt || 0) < PACE.slowTurnTypingGrace;
+  }
+
+  function clearSlowTurnTimers(options) {
+    options = options || {};
+    (state.slowTurn.timers || []).forEach(function (timer) { clearTimeout(timer); });
+    state.slowTurn = { active: false, timers: [], fired: {}, turnKey: '', recentSpeakers: [], lastQuantityInputAt: state.slowTurn.lastQuantityInputAt || 0 };
+    if (!options.preserveTension) state.tableTension = 0;
+    if (options.restoreMood !== false) restoreSlowTurnMoods();
+  }
+
+  function restoreSlowTurnMoods() {
+    Object.keys(state.slowTurnMoodBackups || {}).forEach(function (id) {
+      var p = playerById(id);
+      var backup = state.slowTurnMoodBackups[id];
+      if (p && backup) {
+        p.mood = backup.mood;
+        p.moodLevel = backup.moodLevel;
+        p.slowTurnPressured = false;
+      }
+    });
+    state.slowTurnMoodBackups = {};
+  }
+
+  function chooseSlowTurnSpeakers(level) {
+    var candidates = activePlayers().filter(function (p) { return p.ai && !p.eliminated && state.slowTurn.recentSpeakers.indexOf(p.id) === -1; });
+    if (!candidates.length) candidates = activePlayers().filter(function (p) { return p.ai && !p.eliminated; });
+    var count = level >= 3 ? Math.min(2, candidates.length) : Math.min(1, candidates.length);
+    var speakers = [];
+    while (speakers.length < count && candidates.length) {
+      var index = Math.floor(Math.random() * candidates.length);
+      speakers.push(candidates.splice(index, 1)[0]);
+    }
+    speakers.forEach(function (speaker) {
+      state.slowTurn.recentSpeakers.push(speaker.id);
+      state.slowTurn.recentSpeakers = state.slowTurn.recentSpeakers.slice(-4);
+    });
+    return speakers;
+  }
+
+  function applySlowTurnMoodPressure(humanPlayer, delayLevel) {
+    var changed = [];
+    activePlayers().filter(function (p) { return p.ai && !p.eliminated; }).forEach(function (ai) {
+      var style = ai.playStyle || 'calm';
+      var currentMood = ai.moodLevel || ai.mood || 'calm';
+      var chance = delayLevel === 1 ? 0.18 : delayLevel === 2 ? 0.42 : 0.68;
+      if (style === 'calm' && delayLevel < 3) chance *= 0.35;
+      if (style === 'aggressive' || style === 'cocky') chance += 0.12;
+      if (style === 'chaotic') chance += 0.08;
+      if (Math.random() > Math.min(0.9, chance)) return;
+      if (!state.slowTurnMoodBackups[ai.id]) state.slowTurnMoodBackups[ai.id] = { mood: ai.mood || 'calm', moodLevel: ai.moodLevel || ai.mood || 'calm' };
+      if (style === 'aggressive' || style === 'cocky') ai.moodLevel = 'angry';
+      else if (currentMood === 'nervous' || style === 'cautious') ai.moodLevel = 'nervous';
+      else if (style === 'chaotic') ai.moodLevel = Math.random() < 0.5 ? 'angry' : 'cocky';
+      else if (delayLevel >= 3) ai.moodLevel = 'nervous';
+      ai.mood = ai.moodLevel;
+      ai.slowTurnPressured = true;
+      changed.push(ai);
+    });
+    return changed;
+  }
+
+  function fireSlowTurnTaunt(level) {
+    if (!isSlowTurnEligible() || !window.getSlowTurnTaunt || !window.showSpeechBubble) return false;
+    var human = currentPlayer();
+    var speakers = chooseSlowTurnSpeakers(level);
+    if (!speakers.length) return false;
+    state.tableTension = Math.max(state.tableTension, level);
+    applySlowTurnMoodPressure(human, level);
+    speakers.forEach(function (speaker) {
+      window.showSpeechBubble(speaker.id, window.getSlowTurnTaunt(speaker, human, level));
+    });
+    return true;
+  }
+
+  function scheduleSlowTurnTaunt(level, delay, turnKey) {
+    var timer = setTimeout(function () {
+      if (!state.slowTurn.active || state.slowTurn.turnKey !== turnKey || state.slowTurn.fired[level]) return;
+      if (!isSlowTurnEligible()) return;
+      var sinceTyping = Date.now() - (state.slowTurn.lastQuantityInputAt || 0);
+      if (shouldDelaySlowTurnForTyping()) {
+        scheduleSlowTurnTaunt(level, PACE.slowTurnTypingGrace - sinceTyping + 50, turnKey);
+        return;
+      }
+      state.slowTurn.fired[level] = true;
+      fireSlowTurnTaunt(level);
+    }, delay);
+    state.slowTurn.timers.push(timer);
+  }
+
+  function startHumanTurnTimer() {
+    clearSlowTurnTimers();
+    if (!isSlowTurnEligible()) return false;
+    var turnKey = state.roundNumber + ':' + state.turnIndex + ':' + Date.now();
+    state.slowTurn.active = true;
+    state.slowTurn.turnKey = turnKey;
+    state.slowTurn.fired = {};
+    state.slowTurn.recentSpeakers = [];
+    scheduleSlowTurnTaunt(1, PACE.slowTurnFirstTaunt, turnKey);
+    scheduleSlowTurnTaunt(2, PACE.slowTurnSecondTaunt, turnKey);
+    scheduleSlowTurnTaunt(3, PACE.slowTurnThirdTaunt, turnKey);
+    return true;
+  }
+
+  function restartHumanTurnTimerIfEligible() {
+    if (isSlowTurnEligible()) startHumanTurnTimer();
+  }
+
+  function shouldSelectSlowAiRoll(roll) {
+    return Number(roll) < PACE.slowAiTurnChance;
+  }
+
+  function selectSlowAiForRound(forcedRoll) {
+    state.slowAiThisRound = null;
+    state.slowAiTurnUsed = false;
+    var candidates = activePlayers().filter(function (p) { return p && p.ai && !p.empty && !p.eliminated; });
+    if (!candidates.length) return null;
+    var roll = typeof forcedRoll === 'number' ? forcedRoll : Math.random();
+    if (!shouldSelectSlowAiRoll(roll)) return null;
+    var pickRoll = typeof forcedRoll === 'number' ? (roll / Math.max(PACE.slowAiTurnChance, 0.001)) : Math.random();
+    var selected = candidates[Math.min(candidates.length - 1, Math.floor(pickRoll * candidates.length))];
+    state.slowAiThisRound = selected.id;
+    console.log('[PACE] slow AI selected for round:', selected.name);
+    return selected.id;
+  }
+
+  function cancelSlowAiIfInvalid() {
+    if (!state.slowAiThisRound) return false;
+    var selected = playerById(state.slowAiThisRound);
+    if (selected && selected.ai && !selected.empty && !selected.eliminated) return false;
+    state.slowAiThisRound = null;
+    state.slowAiTurnUsed = true;
+    return true;
+  }
+
+  function isSlowAiDelayBlocked() {
+    return !!(state.gameOver || state.revealMode || state.calzaWindowOpen || isModalBlockingSlowTurn() || (typeof document !== 'undefined' && document.hidden));
+  }
+
+  function shouldRunSlowAiTurn(player) {
+    cancelSlowAiIfInvalid();
+    return !!(player && player.ai && state.slowAiThisRound === player.id && !state.slowAiTurnUsed && !isSlowAiDelayBlocked());
+  }
+
+  function markSlowAiTurnUsed(player) {
+    if (!player || state.slowAiThisRound !== player.id) return false;
+    state.slowAiTurnUsed = true;
+    state.slowAiThisRound = null;
+    return true;
+  }
+
+  function chooseSlowAiTauntSpeakers(slowAi, level) {
+    var recent = state.slowTurn.recentSpeakers || [];
+    var candidates = activePlayers().filter(function (p) { return p && p.ai && !p.empty && !p.eliminated && (!slowAi || p.id !== slowAi.id) && recent.indexOf(p.id) === -1; });
+    if (!candidates.length) candidates = activePlayers().filter(function (p) { return p && p.ai && !p.empty && !p.eliminated && (!slowAi || p.id !== slowAi.id); });
+    var count = level >= 2 ? Math.min(2, candidates.length) : Math.min(1, candidates.length);
+    var speakers = [];
+    while (speakers.length < count && candidates.length) {
+      speakers.push(candidates.splice(Math.floor(Math.random() * candidates.length), 1)[0]);
+    }
+    speakers.forEach(function (speaker) {
+      state.slowTurn.recentSpeakers.push(speaker.id);
+      state.slowTurn.recentSpeakers = state.slowTurn.recentSpeakers.slice(-4);
+    });
+    return speakers;
+  }
+
+  function rememberSlowTurnMood(player) {
+    if (player && !state.slowTurnMoodBackups[player.id]) state.slowTurnMoodBackups[player.id] = { mood: player.mood || 'calm', moodLevel: player.moodLevel || player.mood || 'calm' };
+  }
+
+  function applySlowAiMoodPressure(slowAi, delayLevel) {
+    var changed = [];
+    if (!slowAi) return changed;
+    var slowChance = Math.min(0.85, 0.25 + delayLevel * 0.18);
+    if (Math.random() < slowChance) {
+      rememberSlowTurnMood(slowAi);
+      slowAi.moodLevel = 'nervous';
+      slowAi.mood = 'nervous';
+      slowAi.slowTurnPressured = true;
+      changed.push(slowAi);
+    }
+    activePlayers().filter(function (p) { return p.ai && p.id !== slowAi.id && !p.eliminated; }).forEach(function (ai) {
+      var style = ai.playStyle || ai.personality || 'calm';
+      var chance = 0.05 + delayLevel * 0.12;
+      if (style === 'aggressive' || style === 'cocky') chance += 0.18;
+      if (style === 'chaotic') chance += 0.12;
+      if (style === 'calm') chance -= 0.05;
+      if (Math.random() > Math.max(0, Math.min(0.8, chance))) return;
+      rememberSlowTurnMood(ai);
+      if (style === 'aggressive') ai.moodLevel = 'angry';
+      else if (style === 'cocky') ai.moodLevel = 'cocky';
+      else if (style === 'chaotic') ai.moodLevel = Math.random() < 0.5 ? 'angry' : 'cocky';
+      else ai.moodLevel = delayLevel >= 2 ? 'nervous' : (ai.moodLevel || 'calm');
+      ai.mood = ai.moodLevel;
+      ai.slowTurnPressured = true;
+      changed.push(ai);
+    });
+    return changed;
+  }
+
+  function fireSlowAiTurnTaunt(slowAi, level) {
+    if (!shouldRunSlowAiTurn(slowAi) || !window.getSlowTurnTaunt || !window.showSpeechBubble) return false;
+    var speakers = chooseSlowAiTauntSpeakers(slowAi, level);
+    if (!speakers.length) return false;
+    state.tableTension = Math.max(state.tableTension, level);
+    applySlowAiMoodPressure(slowAi, level);
+    speakers.forEach(function (speaker) {
+      window.showSpeechBubble(speaker.id, window.getSlowTurnTaunt(speaker, slowAi, level));
+    });
+    return true;
+  }
+
+  async function runSlowAiTurnDelay(player) {
+    if (!shouldRunSlowAiTurn(player)) return false;
+    console.log('[PACE] slow AI turn started:', player.name);
+    setAction(player.name + ' is thinking...');
+    state.slowTurn.recentSpeakers = [];
+    renderGame();
+    var elapsed = 0;
+    await wait(PACE.slowAiFirstTauntDelay);
+    elapsed += PACE.slowAiFirstTauntDelay;
+    fireSlowAiTurnTaunt(player, 1);
+    await wait(Math.max(0, PACE.slowAiSecondTauntDelay - elapsed));
+    elapsed = PACE.slowAiSecondTauntDelay;
+    fireSlowAiTurnTaunt(player, 2);
+    await wait(Math.max(0, PACE.slowAiThinkDelay - elapsed));
+    markSlowAiTurnUsed(player);
+    console.log('[PACE] slow AI turn finished:', player.name);
+    return true;
   }
 
   async function maybeAiCalzaWindow() {
@@ -267,6 +552,7 @@
   }
 
   function startGame() {
+    clearSlowTurnTimers();
     state.players.forEach(function (p) { if (!p.empty) { p.diceCount = 5; p.eliminated = false; p.spectator = false; p.events = {}; p.palaficoUsed = false; } });
     state.dudoStats = {};
     state.pendingPalificoPlayerId = null;
@@ -278,6 +564,10 @@
     state.gameOver = false;
     state.turnBusy = false;
     state.calzaWindowOpen = false;
+    state.openingBanterDone = false;
+    state.lastNewPlayerMoment = {};
+    state.slowAiThisRound = null;
+    state.slowAiTurnUsed = false;
     state.quantityInputTouched = false;
     state.bidInputContextKey = '';
     $('gameLog').innerHTML = '';
@@ -289,6 +579,7 @@
   }
 
   async function beginRound(starterId) {
+    clearSlowTurnTimers();
     state.turnBusy = true;
     state.calzaWindowOpen = false;
     state.roundNumber += 1;
@@ -316,6 +607,7 @@
     }
     state.pendingPalificoPlayerId = null;
     activePlayers().forEach(function (p) { p.dice = rollDice(p.diceCount); });
+    selectSlowAiForRound();
     if (state.roundNumber === 1 && !starterId) starterId = window.getFirstRoundStarterId(state.players);
     state.turnIndex = state.players.findIndex(function (p) { return p.id === starterId && !p.eliminated; });
     if (state.turnIndex < 0) state.turnIndex = state.players.findIndex(function (p) { return !p.empty && !p.eliminated; });
@@ -324,6 +616,7 @@
     renderGame();
     window.playDiceRollSound();
     await window.animateDiceRoll();
+    await runOpeningBanterIfNeeded();
     await wait(PACE.roundStartPause);
     state.turnBusy = false;
     promptTurn();
@@ -452,10 +745,10 @@
     var rank = safeRankBadge(p);
     var active = currentPlayer() && currentPlayer().id === p.id ? ' active-turn' : '';
     var human = currentPlayer() && currentPlayer().id === p.id && p.human ? ' human-turn' : '';
-    var palaficoFocus = state.palaficoPlayerId === p.id && state.palificoActive ? ' palafico-focus' : '';
+    var palaficoHighlight = state.palaficoPlayerId === p.id && state.palificoActive ? ' palafico-highlight' : '';
     var eliminated = p.eliminated ? ' eliminated' : '';
     var mobileClass = ' player-count-' + safeText(activeCount || 0) + ' seat-pos-' + safeText(activeSeatIndex || 0);
-    return '<article class="seat' + active + human + palaficoFocus + eliminated + mobileClass + '" data-player-id="' + safeText(p.id) + '" style="--turn-color:' + safeText(p.cupColour) + '"><div class="avatar-line"><span class="avatar">' + safeText(p.avatar) + '</span><div><div class="player-name">' + safeText(p.name) + '</div><span class="rank-badge">' + safeText(rank) + '</span></div></div><div class="cup" style="--cup:' + safeText(p.cupColour) + '"></div><p class="meta">Mood: ' + safeText(p.mood) + ' · Dice: ' + safeText(p.diceCount) + '</p><div class="dice-row">' + dice + '</div></article>';
+    return '<article class="seat' + active + human + palaficoHighlight + eliminated + mobileClass + '" data-player-id="' + safeText(p.id) + '" style="--turn-color:' + safeText(p.cupColour) + '"><div class="avatar-line"><span class="avatar">' + safeText(p.avatar) + '</span><div><div class="player-name">' + safeText(p.name) + '</div><span class="rank-badge">' + safeText(rank) + '</span></div></div><div class="cup" style="--cup:' + safeText(p.cupColour) + '"></div><p class="meta">Mood: ' + safeText(p.mood) + ' · Dice: ' + safeText(p.diceCount) + '</p><div class="dice-row">' + dice + '</div></article>';
   }
 
   function legalBidsForFace(face, player, roundState) {
@@ -582,6 +875,7 @@
 
   function handleQuantityInput() {
     state.quantityInputTouched = true;
+    state.slowTurn.lastQuantityInputAt = Date.now();
     updateBidControls();
     updateBidHint();
   }
@@ -608,6 +902,7 @@
       showBidInputError(getBidValidationMessage(bid, player, roundState));
       return false;
     }
+    clearSlowTurnTimers({ preserveTension: true });
     state.quantityInputTouched = false;
     return placeBid('human', bid);
   }
@@ -660,12 +955,18 @@
     if (p.human) {
       setAction('Your turn: raise the bid' + (state.currentBid ? ' or challenge the last bid.' : '.') );
       renderGame();
+      startHumanTurnTimer();
       return;
     }
     state.turnBusy = true;
     setAction(p.name + ' is thinking...');
     renderGame();
-    await wait(randomBetween(PACE.aiThinkingMin, PACE.aiThinkingMax));
+    var slowAiDelayRan = await runSlowAiTurnDelay(p);
+    if (!slowAiDelayRan) await wait(randomBetween(PACE.aiThinkingMin, PACE.aiThinkingMax));
+    if (state.gameOver || p.eliminated || !currentPlayer() || currentPlayer().id !== p.id) {
+      state.turnBusy = false;
+      return promptTurn();
+    }
     window.maybeSpeak(p, 'turn', state.currentBid ? playerById(state.previousBidderId) : null);
     await wait(PACE.speechPause);
     var move = window.PerudoAI.chooseAIMove(p, Object.assign(makeRoundState(), { streakTarget: false }));
@@ -709,11 +1010,13 @@
     setAction(p.name + ' bids ' + bidText(state.currentBid) + '.');
     log(p.name + ' bids ' + bidText(state.currentBid) + '.');
     window.playBidSound();
-    if (window.getBanterLevel && window.getBanterLevel() > 0 && window.showSpeechBubble && window.getBanterLine) {
+    if (p.ai && window.getBanterLevel && window.getBanterLevel() > 0 && window.showSpeechBubble && window.getBanterLine) {
       window.showSpeechBubble(p.id, window.getBanterLine(p, 'bid', activePlayers().find(function (x) { return x.id !== p.id; }), speechBidContext(state.currentBid)));
     }
     renderGame();
-    await runTableTalk(p.human ? 'afterHumanBid' : 'afterBid', makeTalkContext(p, state.currentBid, { previousBid: previousBidForTalk, nextPlayer: peekNextPlayer() }));
+    var talkContext = makeTalkContext(p, state.currentBid, { previousBid: previousBidForTalk, nextPlayer: peekNextPlayer() });
+    await runTableTalk(p.human ? 'afterHumanBid' : 'afterBid', talkContext);
+    if (p.human && (talkContext.risk === 'high' || talkContext.risk === 'absurd')) await runNewPlayerMoment('newPlayerGoodMove', p, talkContext);
     await wait(PACE.bidResultPause);
     nextTurn();
     setAction(currentPlayer().name + ' is next. Calza window open.');
@@ -742,6 +1045,7 @@
       renderGame();
       return;
     }
+    if (challenger.human) clearSlowTurnTimers({ preserveTension: true });
     setAction('DUDO CALLED - ' + challenger.name + ' challenges ' + bidder.name + "'s bid.");
     emphasizeLiarCalled(true);
     log('LIAR CALLED: ' + challenger.name + ' challenges ' + bidder.name + "'s bid: " + bidText(state.currentBid) + '.');
@@ -780,6 +1084,8 @@
     setAction((bidSurvived ? 'Bid was true' : 'Bid was false') + ' - ' + (bidSurvived ? 'challenger' : 'bidder') + ' loses 1 die. ' + loser.name + ' loses it.');
     log(loser.name + ' loses 1 die.');
     await runTableTalk(result.callerCorrect ? 'afterDudoSuccess' : 'afterDudoFail', makeTalkContext(challenger, state.currentBid, { caller: challenger, target: loser, lastBidder: bidder.name, risk: 'high' }));
+    if (challenger.human && result.callerCorrect) await runNewPlayerMoment('newPlayerGoodMove', challenger, { target: bidder, caller: challenger, risk: 'high' });
+    if (bidder.human && !result.callerCorrect) await runNewPlayerMoment('newPlayerGoodMove', bidder, { target: challenger, caller: challenger, risk: 'high' });
     await wait(PACE.challengeResultDisplay);
     emphasizeLiarCalled(false);
     await loseDie(loser);
@@ -805,6 +1111,7 @@
       renderGame();
       return;
     }
+    if (caller.human) clearSlowTurnTimers({ preserveTension: true });
     state.calzaWindowOpen = false;
     state.turnBusy = true;
     setAction(caller.name + ' calls CALZA!');
@@ -837,12 +1144,14 @@
       log(caller.name + ' called Calza exactly and ' + (gain.gainedDie ? 'gains 1 die.' : 'stays at 5 dice.'));
       renderGame();
       await runTableTalk('afterCalzaSuccess', makeTalkContext(caller, state.currentBid, { caller: caller, target: caller, risk: 'high' }));
+      if (caller.human) await runNewPlayerMoment('newPlayerGoodMove', caller, { caller: caller, target: caller, risk: 'high' });
       await wait(PACE.challengeResultDisplay);
     } else {
       if (window.applyAIMoodEvent) window.applyAIMoodEvent(caller, 'failedCalza');
       setAction('Calza wrong - ' + caller.name + ' loses 1 die. Previous bidder is safe.');
       log(caller.name + ' called Calza wrong and loses 1 die. Previous bidder is safe.');
       await runTableTalk('afterCalzaFail', makeTalkContext(caller, state.currentBid, { caller: caller, target: caller, risk: 'high' }));
+      if (caller.human) await runNewPlayerMoment('newPlayerBadMove', caller, { caller: caller, target: caller, risk: 'high' });
       await wait(PACE.challengeResultDisplay);
       await loseDie(caller);
       await wait(PACE.diceLossWinnerPause);
@@ -875,10 +1184,12 @@
       log(player.name + ' has been eliminated and moves to Spectators.');
       renderGame();
       await runTableTalk('afterElimination', makeTalkContext(player, state.currentBid, { target: player, risk: 'high' }));
+      if (player.human) await runNewPlayerMoment('newPlayerEliminated', player, { target: player, risk: 'high' });
     } else {
       window.maybeSpeak(player, 'loss', null);
       renderGame();
       await runTableTalk(loss.startsPalafico ? 'afterPalaficoStart' : 'afterDiceLoss', makeTalkContext(player, state.currentBid, { target: player, risk: loss.startsPalafico ? 'high' : 'medium' }));
+      if (player.human) await runNewPlayerMoment('newPlayerBadMove', player, { target: player, risk: loss.startsPalafico ? 'high' : 'medium' });
     }
     renderGame();
     window.maybeSpectatorSpeak(state.players, player);
@@ -892,6 +1203,7 @@
   }
 
   function endGame(winner) {
+    clearSlowTurnTimers();
     state.gameOver = true;
     state.revealMode = true;
     setAction(winner.name + ' wins the game.');
@@ -942,15 +1254,24 @@
     $('calzaButton').addEventListener('click', function () { callCalza('human'); });
     $('bidQuantity').addEventListener('input', handleQuantityInput);
     $('bidFace').addEventListener('change', handleFaceChange);
-    $('settingsButton').addEventListener('click', function () { $('settingsPanel').classList.toggle('hidden'); });
+    $('settingsButton').addEventListener('click', function () {
+      $('settingsPanel').classList.toggle('hidden');
+      if ($('settingsPanel').classList.contains('hidden')) restartHumanTurnTimerIfEligible();
+      else clearSlowTurnTimers();
+    });
     $('banterLevel').addEventListener('change', function () { if (window.setBanterLevel) window.setBanterLevel($('banterLevel').value); else localStorage.setItem('perudoBanterLevel', $('banterLevel').value); });
     if ($('aiSkillLevel')) $('aiSkillLevel').addEventListener('change', function () { state.aiSkillLevel = $('aiSkillLevel').value; if (window.setAiSkillLevel) window.setAiSkillLevel(state.aiSkillLevel); });
     $('soundToggle').addEventListener('change', function () { window.PerudoSound.setSoundSettings({ enabled: $('soundToggle').checked }); });
     $('volumeSlider').addEventListener('input', function () { window.PerudoSound.setSoundSettings({ volume: Number($('volumeSlider').value) }); });
     $('skipAnimationsToggle').addEventListener('change', function () { localStorage.setItem('perudoSkipAnimations', $('skipAnimationsToggle').checked); });
     if ($('calzaToggle')) $('calzaToggle').addEventListener('change', function () { state.calzaEnabled = $('calzaToggle').checked; localStorage.setItem('calzaEnabled', state.calzaEnabled); renderGame(); });
-    $('leaderboardButton').addEventListener('click', function () { window.renderLeaderboard('leaderboardDialogContent'); $('leaderboardDialog').showModal(); });
-    $('closeLeaderboard').addEventListener('click', function () { $('leaderboardDialog').close(); });
+    $('leaderboardButton').addEventListener('click', function () { clearSlowTurnTimers(); window.renderLeaderboard('leaderboardDialogContent'); $('leaderboardDialog').showModal(); });
+    $('closeLeaderboard').addEventListener('click', function () { $('leaderboardDialog').close(); restartHumanTurnTimerIfEligible(); });
+    $('leaderboardDialog').addEventListener('close', restartHumanTurnTimerIfEligible);
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) clearSlowTurnTimers();
+      else restartHumanTurnTimerIfEligible();
+    });
     $('replayButton').addEventListener('click', function () { state.players = createPlayers(); renderReveal(); showScreen('revealScreen'); });
     state.profile = window.loadProfile();
     renderActionPanel();
@@ -1058,6 +1379,195 @@
     }
   }
 
+  function mobileSpeechBubbleCssReadable() {
+    try {
+      var css = Array.from(document.styleSheets).map(function (sheet) {
+        return Array.from(sheet.cssRules || []).map(function (rule) { return rule.cssText; }).join('\n');
+      }).join('\n');
+      return css.indexOf('.speech-bubble') !== -1 && css.indexOf('max-height') !== -1 && css.indexOf('overflow: hidden') !== -1;
+    } catch (err) {
+      console.warn('Could not inspect mobile speech CSS:', err);
+      return false;
+    }
+  }
+
+  function runSlowTurnConsoleTests() {
+    var saved = {
+      players: state.players,
+      turnIndex: state.turnIndex,
+      gameOver: state.gameOver,
+      turnBusy: state.turnBusy,
+      revealMode: state.revealMode,
+      calzaWindowOpen: state.calzaWindowOpen,
+      slowTurn: state.slowTurn,
+      slowTurnMoodBackups: state.slowTurnMoodBackups,
+      slowAiThisRound: state.slowAiThisRound,
+      slowAiTurnUsed: state.slowAiTurnUsed,
+      tableTension: state.tableTension
+    };
+    var originalRandom = Math.random;
+    clearSlowTurnTimers();
+    try {
+      state.players = [
+        { id: 'human', name: 'Steve', human: true, empty: false, eliminated: false, diceCount: 5, dice: [2, 3, 4, 5, 6], mood: 'calm', moodLevel: 'calm' },
+        { id: 'ai-a', name: 'Bristol Bear', ai: true, empty: false, eliminated: false, diceCount: 5, dice: [1, 4, 4, 2, 6], playStyle: 'aggressive', mood: 'calm', moodLevel: 'calm' },
+        { id: 'ai-b', name: 'Ducky Dan', ai: true, empty: false, eliminated: false, diceCount: 5, dice: [2, 2, 3, 4, 5], playStyle: 'cocky', mood: 'calm', moodLevel: 'calm' }
+      ];
+      state.turnIndex = 0;
+      state.gameOver = false;
+      state.turnBusy = false;
+      state.revealMode = false;
+      state.calzaWindowOpen = false;
+      if ($('settingsPanel')) $('settingsPanel').classList.add('hidden');
+      if ($('leaderboardDialog') && $('leaderboardDialog').open) $('leaderboardDialog').close();
+
+      var starts = startHumanTurnTimer();
+      var noEarlyTaunt = !state.slowTurn.fired[1] && !state.slowTurn.fired[2] && !state.slowTurn.fired[3];
+      var timerCount = state.slowTurn.timers.length;
+      var firstTaunt = fireSlowTurnTaunt(1);
+      var secondThirdNotEarly = !state.slowTurn.fired[2] && !state.slowTurn.fired[3];
+      state.slowTurn.lastQuantityInputAt = Date.now();
+      var typingGraceBlocks = shouldDelaySlowTurnForTyping();
+
+      Math.random = function () { return 0; };
+      var changed = applySlowTurnMoodPressure(state.players[0], 3);
+      var moodChanged = changed.length > 0 && state.players[1].moodLevel === 'angry';
+      restoreSlowTurnMoods();
+      var moodRestored = state.players[1].moodLevel === 'calm' && state.players[2].moodLevel === 'calm';
+
+      clearSlowTurnTimers();
+      var clearsAfterBid = !state.slowTurn.active && state.slowTurn.timers.length === 0;
+      startHumanTurnTimer(); clearSlowTurnTimers();
+      var clearsAfterDudo = !state.slowTurn.active && state.slowTurn.timers.length === 0;
+      startHumanTurnTimer(); clearSlowTurnTimers();
+      var clearsAfterCalza = !state.slowTurn.active && state.slowTurn.timers.length === 0;
+
+      state.revealMode = true;
+      var noRevealTaunt = !startHumanTurnTimer() && !fireSlowTurnTaunt(1);
+      state.revealMode = false;
+
+      return {
+        slowTurnTimerStarts: starts && timerCount === 3,
+        noTauntBeforeThreshold: noEarlyTaunt,
+        firstTauntFiresAfterThreshold: firstTaunt,
+        secondThirdDoNotFireEarly: secondThirdNotEarly,
+        timerClearsAfterHumanBid: clearsAfterBid,
+        timerClearsAfterDudo: clearsAfterDudo,
+        timerClearsAfterCalza: clearsAfterCalza,
+        noTauntsDuringRevealAnimations: noRevealTaunt,
+        typingGracePreventsTaunt: typingGraceBlocks,
+        aiMoodCanTemporarilyChange: moodChanged,
+        aiMoodRestoresAfterHumanAction: moodRestored,
+        mobileSpeechBubblesRemainReadable: mobileSpeechBubbleCssReadable()
+      };
+    } finally {
+      Math.random = originalRandom;
+      clearSlowTurnTimers();
+      state.players = saved.players;
+      state.turnIndex = saved.turnIndex;
+      state.gameOver = saved.gameOver;
+      state.turnBusy = saved.turnBusy;
+      state.revealMode = saved.revealMode;
+      state.calzaWindowOpen = saved.calzaWindowOpen;
+      state.slowTurn = saved.slowTurn;
+      state.slowTurnMoodBackups = saved.slowTurnMoodBackups;
+      state.slowAiThisRound = saved.slowAiThisRound;
+      state.slowAiTurnUsed = saved.slowAiTurnUsed;
+      state.tableTension = saved.tableTension;
+    }
+  }
+
+  function runSlowAiConsoleTests() {
+    var saved = {
+      players: state.players,
+      turnIndex: state.turnIndex,
+      gameOver: state.gameOver,
+      turnBusy: state.turnBusy,
+      revealMode: state.revealMode,
+      calzaWindowOpen: state.calzaWindowOpen,
+      slowTurn: state.slowTurn,
+      slowTurnMoodBackups: state.slowTurnMoodBackups,
+      slowAiThisRound: state.slowAiThisRound,
+      slowAiTurnUsed: state.slowAiTurnUsed,
+      tableTension: state.tableTension
+    };
+    var originalRandom = Math.random;
+    try {
+      state.players = [
+        { id: 'human', name: 'Steve', human: true, empty: false, eliminated: false, diceCount: 5, dice: [2, 3, 4, 5, 6], mood: 'calm', moodLevel: 'calm' },
+        { id: 'ai-a', name: 'Bristol Bear', ai: true, empty: false, eliminated: false, diceCount: 5, dice: [1, 4, 4, 2, 6], playStyle: 'aggressive', mood: 'calm', moodLevel: 'calm' },
+        { id: 'ai-b', name: 'Ducky Dan', ai: true, empty: false, eliminated: false, diceCount: 5, dice: [2, 2, 3, 4, 5], playStyle: 'cocky', mood: 'calm', moodLevel: 'calm' },
+        { id: 'ai-c', name: 'Lazy Larry', ai: true, empty: false, eliminated: false, diceCount: 4, dice: [1, 3, 3, 5], playStyle: 'calm', mood: 'calm', moodLevel: 'calm' }
+      ];
+      state.turnIndex = 1;
+      state.gameOver = false;
+      state.turnBusy = false;
+      state.revealMode = false;
+      state.calzaWindowOpen = false;
+      state.slowTurnMoodBackups = {};
+      if ($('settingsPanel')) $('settingsPanel').classList.add('hidden');
+      if ($('leaderboardDialog') && $('leaderboardDialog').open) $('leaderboardDialog').close();
+
+      var selected = selectSlowAiForRound(0.01);
+      var maxOne = !!selected && typeof selected === 'string' && state.slowAiThisRound === selected;
+      var chanceCount = 0;
+      for (var i = 0; i < 100; i += 1) if (shouldSelectSlowAiRoll(i / 100)) chanceCount += 1;
+      var roughlyTwenty = chanceCount >= 18 && chanceCount <= 22;
+      var waitsAroundEight = PACE.slowAiThinkDelay >= 7500 && PACE.slowAiThinkDelay <= 8500;
+
+      state.slowAiThisRound = 'ai-a';
+      state.slowAiTurnUsed = false;
+      var speakers = chooseSlowAiTauntSpeakers(state.players[1], 2);
+      var tauntLine = speakers[0] && window.getSlowTurnTaunt ? window.getSlowTurnTaunt(speakers[0], state.players[1], 2) : '';
+      var otherPlayersTaunt = speakers.length > 0 && speakers.every(function (speaker) { return speaker.id !== 'ai-a' && speaker.ai; }) && !!tauntLine;
+
+      var beforeTurnIndex = state.turnIndex;
+      var clearedAfterUse = markSlowAiTurnUsed(state.players[1]) && state.slowAiThisRound === null && state.slowAiTurnUsed;
+      var turnOrderSafe = state.turnIndex === beforeTurnIndex;
+
+      state.slowAiThisRound = 'ai-b';
+      state.slowAiTurnUsed = false;
+      state.revealMode = true;
+      var blockedDuringReveal = !shouldRunSlowAiTurn(state.players[2]);
+      state.revealMode = false;
+
+      Math.random = function () { return 0; };
+      state.slowAiThisRound = 'ai-a';
+      state.slowAiTurnUsed = false;
+      var changed = applySlowAiMoodPressure(state.players[1], 2);
+      var slowAiMoodChanges = changed.indexOf(state.players[1]) !== -1 && state.players[1].moodLevel === 'nervous';
+
+      state.slowAiThisRound = 'ai-c';
+      state.players[3].eliminated = true;
+      var cancelledIfEliminated = cancelSlowAiIfInvalid() && state.slowAiThisRound === null && state.slowAiTurnUsed;
+
+      return {
+        maxOneSlowAiTurnPerRound: maxOne,
+        slowAiChanceRoughlyTwentyPercent: roughlyTwenty,
+        selectedAiWaitsAroundEightSeconds: waitsAroundEight,
+        otherPlayersTauntSlowAi: otherPlayersTaunt,
+        slowDelayDoesNotBreakTurnOrder: turnOrderSafe,
+        slowDelayDoesNotHappenDuringAnimations: blockedDuringReveal,
+        selectedSlowAiClearedAfterUse: clearedAfterUse,
+        slowAiMoodCanChange: slowAiMoodChanges,
+        eliminatedSelectedAiIsCancelled: cancelledIfEliminated
+      };
+    } finally {
+      Math.random = originalRandom;
+      state.players = saved.players;
+      state.turnIndex = saved.turnIndex;
+      state.gameOver = saved.gameOver;
+      state.turnBusy = saved.turnBusy;
+      state.revealMode = saved.revealMode;
+      state.calzaWindowOpen = saved.calzaWindowOpen;
+      state.slowTurn = saved.slowTurn;
+      state.slowTurnMoodBackups = saved.slowTurnMoodBackups;
+      state.slowAiThisRound = saved.slowAiThisRound;
+      state.slowAiTurnUsed = saved.slowAiTurnUsed;
+      state.tableTension = saved.tableTension;
+    }
+  }
+
   function runConsoleTests() {
     var ruleFailures = window.runOfficialRulesTests ? window.runOfficialRulesTests() : ['Official rules test runner missing'];
     if (ruleFailures.length) {
@@ -1073,7 +1583,7 @@
       { id: 'b', empty:false, eliminated:false, diceCount: 5, dice:[2,1,3,5,6] },
       { id: 'c', empty:false, eliminated:false, diceCount: 5, dice:[4,2,6,3,5] }
     ];
-    console.assert(window.validatePhraseBank(), 'AI speech categories contain 100 unique phrases each');
+    console.assert(window.validatePhraseBank(), 'AI speech uses smaller curated phrase pools');
     var banterChecks = window.validateBanterSystem ? window.validateBanterSystem() : {};
     var aiChecks = window.validateAiIntelligence ? window.validateAiIntelligence() : {};
     console.assert(banterChecks.reactionsTriggerAfterBids, 'Reactions trigger after bids');
@@ -1083,6 +1593,20 @@
     console.assert(banterChecks.noPhraseRepeatsTooOften, 'No phrase repeats too often');
     console.assert(banterChecks.animalSpecificUsesAnimalType, 'Animal-specific phrases use correct animalType');
     console.assert(banterChecks.reactionSequenceDoesNotSkipPacing, 'Reaction sequence does not skip game pacing');
+    console.assert(banterChecks.humanPlayerDoesNotGenerateSpeech, 'Human player does not generate speech bubbles');
+    console.assert(banterChecks.usesSmallPhrasePools, 'Phrase pool does not use the old 100-phrase random system');
+    console.assert(banterChecks.lowDiceUsesCautiousSpeech, 'Low dice AI uses more cautious speech');
+    console.assert(banterChecks.rankBanterUsesCorrectCategory, 'Banter uses correct rank category');
+    console.assert(banterChecks.newPlayerDetectedCorrectly, 'New player detected correctly');
+    console.assert(banterChecks.rankedPlayerNotNew, 'Ranked player is not treated as new');
+    console.assert(banterChecks.newPlayerWelcomeFiresOnce, 'New-player welcome fires once at game start');
+    console.assert(banterChecks.goodMoveTriggersNewPlayerPraise, 'Good move triggers new-player praise');
+    console.assert(banterChecks.badMoveTriggersNewPlayerMockery, 'Bad move triggers new-player mockery');
+    console.assert(banterChecks.aiIntroOnlyIfNotMet, 'AI intro only appears if not met before');
+    console.assert(banterChecks.metAiSavedToLocalStorage, 'Met AI is saved to localStorage');
+    console.assert(banterChecks.introDoesNotBreakTurnOrder, 'Intro does not break turn order');
+    console.assert(banterChecks.noRepeatedNicknameSpam, 'No repeated nickname spam');
+    console.assert(banterChecks.slowTurnTauntExists, 'Slow-turn taunt phrase pool is available');
     console.assert(typeof runCalzaShout === 'function', 'Calza shout fires when Calza is called');
     var palTestPlayers = [{ id: 'p', name: 'Pal', diceCount: 1, dice: [3], palaficoUsed: false }, { id: 'a', diceCount: 3 }, { id: 'b', diceCount: 3 }];
     console.assert(shouldTriggerPalaficoAnnouncement(palTestPlayers[0], { players: palTestPlayers }), 'Palafico shout fires when player drops from 2 dice to 1');
@@ -1098,6 +1622,18 @@
     console.assert(aiChecks.angryChallengesMore, 'Angry AI challenges more');
     console.assert(aiChecks.nervousHasHigherVariance, 'Nervous AI has higher variance');
     console.assert(aiChecks.cockyBluffsMore, 'Cocky AI bluffs more');
+    console.assert(aiChecks.fiveDiceMoreAggressiveThanOneDie, 'AI with 5 dice chooses more aggressive bids than AI with 1 die');
+    console.assert(aiChecks.lowDiceAvoidsAbsurdBids, 'AI with 1-2 dice avoids absurd bids unless strongly justified');
+    console.assert(aiChecks.moodDoesNotIgnoreLowDiceSurvival, 'Angry/cocky mood does not fully ignore low dice survival');
+    console.assert(aiChecks.rankOneIsElite, 'Rank #1 is treated as elite');
+    console.assert(aiChecks.rankFourToTenIsStrong, 'Rank 4-10 is strong');
+    console.assert(aiChecks.rankTwentySixPlusIsLow, 'Rank 26+ is low');
+    console.assert(aiChecks.missingRankSafe, 'Missing rank does not crash');
+    console.assert(aiChecks.bluffChanceDecreasesAgainstElite, 'AI bluff chance decreases against elite target');
+    console.assert(aiChecks.challengeChanceIncreasesAgainstElite, 'AI challenge chance increases against elite suspicious bid');
+    console.assert(aiChecks.bluffChanceIncreasesAgainstLow, 'AI bluff chance increases slightly against low-ranked target');
+    console.assert(aiChecks.closeRankRivalryDetected, 'Close rank rivalry detected when rank gap <= 3');
+    console.assert(aiChecks.moodStillModifiesRankAwareBehaviour, 'Mood still modifies rank-aware behaviour');
     console.assert(aiChecks.aiNeverIllegal, 'AI never makes illegal bids');
     console.assert(aiChecks.noIllegalPalaficoFaceChange, 'AI never changes face illegally in Palafico');
     console.assert(aiChecks.respectsAcesRules, 'AI respects aces rules');
@@ -1116,6 +1652,29 @@
     console.assert(bidInputChecks.fiveAcesRejected, '5 aces is rejected after 11 twos');
     console.assert(bidInputChecks.inputDoesNotAutoReset, 'Quantity input does not auto-reset while typing');
     console.assert(bidInputChecks.mobileNamesNotEllipsised, 'Mobile names are not ellipsised unnecessarily');
+    var slowTurnChecks = runSlowTurnConsoleTests();
+    console.assert(slowTurnChecks.slowTurnTimerStarts, 'Slow turn timer starts on human turn');
+    console.assert(slowTurnChecks.noTauntBeforeThreshold, 'No taunt before threshold');
+    console.assert(slowTurnChecks.firstTauntFiresAfterThreshold, 'First taunt fires after threshold');
+    console.assert(slowTurnChecks.secondThirdDoNotFireEarly, 'Second/third taunts do not fire early');
+    console.assert(slowTurnChecks.timerClearsAfterHumanBid, 'Timer clears after human bid');
+    console.assert(slowTurnChecks.timerClearsAfterDudo, 'Timer clears after Dudo');
+    console.assert(slowTurnChecks.timerClearsAfterCalza, 'Timer clears after Calza');
+    console.assert(slowTurnChecks.noTauntsDuringRevealAnimations, 'No taunts during reveal animations');
+    console.assert(slowTurnChecks.typingGracePreventsTaunt, 'No taunt while quantity input was just edited');
+    console.assert(slowTurnChecks.aiMoodCanTemporarilyChange, 'AI mood can temporarily change');
+    console.assert(slowTurnChecks.aiMoodRestoresAfterHumanAction, 'AI mood restores after human action');
+    console.assert(slowTurnChecks.mobileSpeechBubblesRemainReadable, 'Mobile speech bubbles remain readable');
+    var slowAiChecks = runSlowAiConsoleTests();
+    console.assert(slowAiChecks.maxOneSlowAiTurnPerRound, 'Max one slow AI turn per round');
+    console.assert(slowAiChecks.slowAiChanceRoughlyTwentyPercent, 'Slow AI chance is roughly 20%');
+    console.assert(slowAiChecks.selectedAiWaitsAroundEightSeconds, 'Selected AI waits around 8 seconds');
+    console.assert(slowAiChecks.otherPlayersTauntSlowAi, 'Other players taunt the slow AI');
+    console.assert(slowAiChecks.slowDelayDoesNotBreakTurnOrder, 'Slow AI delay does not break turn order');
+    console.assert(slowAiChecks.slowDelayDoesNotHappenDuringAnimations, 'Slow AI delay does not happen during animations');
+    console.assert(slowAiChecks.selectedSlowAiClearedAfterUse, 'Selected slow AI is cleared after use');
+    console.assert(slowAiChecks.slowAiMoodCanChange, 'Slow AI delay can affect mood');
+    console.assert(slowAiChecks.eliminatedSelectedAiIsCancelled, 'Eliminated selected slow AI is cancelled');
     var entry = { cupColourUsage: {} }; window.updateCupColourStats(entry, '#ffffff', true); window.updateCupColourStats(entry, '#ffffff', false);
     console.assert(window.getCupColourWinRate(entry.cupColourUsage['#ffffff']) === 50, 'Cup colour stat tracking');
     var originalBoard = localStorage.getItem('perudoGlobalLeaderboard');
@@ -1135,7 +1694,9 @@
     if (originalSound === null) localStorage.removeItem('perudoSoundSettings'); else localStorage.setItem('perudoSoundSettings', originalSound);
     console.groupEnd();
   }
-  window.PerudoGame = { state: state, PACE: PACE };
+  window.applySlowTurnMoodPressure = applySlowTurnMoodPressure;
+  window.applySlowAiMoodPressure = applySlowAiMoodPressure;
+  window.PerudoGame = { state: state, PACE: PACE, startHumanTurnTimer: startHumanTurnTimer, clearSlowTurnTimers: clearSlowTurnTimers, applySlowTurnMoodPressure: applySlowTurnMoodPressure, selectSlowAiForRound: selectSlowAiForRound, runSlowAiTurnDelay: runSlowAiTurnDelay, applySlowAiMoodPressure: applySlowAiMoodPressure };
   document.addEventListener('DOMContentLoaded', function () { bindEvents(); runConsoleTests(); });
 })();
 
