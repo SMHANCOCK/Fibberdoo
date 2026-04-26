@@ -1234,6 +1234,7 @@
     state.calzaEnabled = savedCalza === null ? true : savedCalza === 'true';
     console.log('Current Action layout loaded');
     console.log('Calza UI loaded');
+    console.log('Ambages font requested from: ./Assets/Fonts/Ambages-l9gy.ttf');
     console.log('Calza enabled:', state.calzaEnabled);
     $('soundToggle').checked = soundSettings.enabled;
     $('volumeSlider').value = soundSettings.volume;

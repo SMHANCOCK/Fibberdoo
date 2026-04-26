@@ -1,4 +1,12 @@
-﻿:root {
+@font-face {
+  font-family: "Ambages";
+  src: url("./Assets/Fonts/Ambages-l9gy.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
   --felt: #12392f;
   --felt-dark: #08231f;
   --cream: #f8edd8;
@@ -8,6 +16,11 @@
   --danger: #bf3b3b;
   --card: rgba(255, 248, 230, 0.92);
   --shadow: 0 20px 55px rgba(0, 0, 0, 0.28);
+  --menu-yellow: #FFD91A;
+  --menu-yellow-dark: #F5B800;
+  --menu-ink: #1A1A1A;
+  --menu-outline: #101820;
+  --brand-font: "Ambages", Georgia, serif;
 }
 * { box-sizing: border-box; }
 body {
@@ -33,6 +46,155 @@ button { cursor: pointer; border: 0; }
 .screen.active { display: block; }
 .profile-screen, .reveal-screen, .game-over-screen { place-content: center; }
 .profile-screen.active, .reveal-screen.active, .game-over-screen.active { display: grid; }
+.profile-screen.active { place-content: start center; }
+.profile-screen, .reveal-screen, .game-over-screen {
+  color: var(--menu-ink);
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+  background:
+    radial-gradient(circle at 12% 18%, rgba(255,255,255,.55), transparent 12rem),
+    radial-gradient(circle at 84% 14%, rgba(245,184,0,.9), transparent 14rem),
+    radial-gradient(circle at 18% 88%, rgba(16,24,32,.12), transparent 16rem),
+    repeating-linear-gradient(-12deg, rgba(255,255,255,.18) 0 10px, rgba(255,255,255,0) 10px 34px),
+    var(--menu-yellow);
+  width: calc(100% + 36px);
+  min-height: 100vh;
+  margin: -18px;
+  padding: 18px;
+  border-radius: 0;
+  overflow: hidden;
+}
+.menu-stack {
+  width: min(920px, 94vw);
+  display: grid;
+  justify-items: center;
+  gap: clamp(14px, 3vw, 24px);
+  padding: clamp(18px, 4vw, 34px) 0;
+}
+.main-title {
+  margin: 0;
+  width: 100%;
+  font-family: var(--brand-font);
+  font-size: clamp(48px, 10vw, 110px);
+  line-height: .82;
+  text-align: center;
+  letter-spacing: 2px;
+  color: var(--menu-outline);
+  text-shadow: 3px 3px 0 rgba(255,255,255,.75), 6px 6px 0 rgba(245,184,0,.95);
+}
+.menu-heading,
+.profile-screen h2,
+.reveal-screen h2,
+.game-over-screen h2,
+.profile-screen .eyebrow,
+.reveal-screen .eyebrow,
+.game-over-screen .eyebrow,
+.profile-screen .primary-button,
+.reveal-screen .primary-button,
+.game-over-screen .primary-button,
+.profile-screen .ghost-button,
+.reveal-screen .ghost-button,
+.game-over-screen .ghost-button {
+  font-family: var(--brand-font);
+}
+.menu-heading {
+  color: var(--menu-outline);
+  font-size: clamp(2rem, 5vw, 4.4rem);
+  line-height: .9;
+  letter-spacing: .04em;
+}
+.profile-screen .hero-card,
+.reveal-screen .reveal-card,
+.game-over-screen .winner-card,
+.game-over-screen .leaderboard-panel {
+  background: rgba(255,255,255,.88);
+  border: 3px solid var(--menu-outline);
+  box-shadow: 8px 8px 0 var(--menu-outline), 0 22px 45px rgba(16,24,32,.22);
+}
+.profile-screen .hero-card {
+  max-width: 760px;
+  width: 100%;
+}
+.profile-screen .eyebrow,
+.reveal-screen .eyebrow,
+.game-over-screen .eyebrow {
+  color: #7a5200;
+  font-size: .95rem;
+  letter-spacing: .16em;
+}
+.profile-screen .intro,
+.reveal-screen .intro,
+.game-over-screen .intro {
+  color: #3a321f;
+  font-family: Georgia, 'Times New Roman', serif;
+}
+.profile-screen label,
+.reveal-screen label,
+.game-over-screen label {
+  color: var(--menu-outline);
+}
+.profile-screen input,
+.profile-screen select,
+.reveal-screen input,
+.reveal-screen select,
+.game-over-screen input,
+.game-over-screen select {
+  background: #fffdf0;
+  border: 3px solid var(--menu-outline);
+  border-radius: 16px;
+  box-shadow: 3px 3px 0 var(--menu-outline);
+}
+.profile-screen .primary-button,
+.reveal-screen .primary-button,
+.game-over-screen .primary-button,
+.profile-screen .ghost-button,
+.reveal-screen .ghost-button,
+.game-over-screen .ghost-button {
+  color: var(--menu-outline);
+  background: #fffdf0;
+  border: 3px solid var(--menu-outline);
+  border-radius: 18px;
+  box-shadow: 4px 4px 0 var(--menu-outline);
+  letter-spacing: .04em;
+}
+.profile-screen .primary-button,
+.reveal-screen .primary-button,
+.game-over-screen .primary-button {
+  background: var(--menu-outline);
+  color: #fffdf0;
+}
+.profile-screen button:hover,
+.reveal-screen button:hover,
+.game-over-screen button:hover {
+  transform: translateY(-2px);
+  box-shadow: 6px 6px 0 var(--menu-outline);
+}
+.profile-screen button:active,
+.reveal-screen button:active,
+.game-over-screen button:active {
+  transform: translateY(2px);
+  box-shadow: 2px 2px 0 var(--menu-outline);
+}
+.reveal-screen .top-bar {
+  width: min(1000px, 92vw);
+  color: var(--menu-outline);
+  background: rgba(255,255,255,.62);
+  border: 3px solid var(--menu-outline);
+  border-radius: 22px;
+  padding: 14px 16px;
+  box-shadow: 5px 5px 0 var(--menu-outline);
+}
+.reveal-screen .reveal-grid {
+  margin-top: 18px;
+}
+.reveal-screen .reveal-card {
+  color: var(--menu-outline);
+}
+.reveal-screen .reveal-card .meta {
+  color: #5c4b20;
+}
+.game-over-screen {
+  padding: clamp(16px, 4vw, 34px);
+}
 .hero-card, .winner-card, .panel, .controls-card, .leaderboard-panel, .settings-panel, .reveal-card, .current-action-panel {
   background: var(--card);
   border: 1px solid rgba(255,255,255,.42);
@@ -262,6 +424,52 @@ dialog { border: 0; border-radius: 24px; padding: 18px; max-width: min(1000px, 9
   }
   html, body { min-height: 100%; }
   .app-shell { padding: 0; min-height: 100dvh; }
+  .profile-screen, .reveal-screen, .game-over-screen {
+    width: 100%;
+    min-height: 100dvh;
+    margin: 0;
+    border-radius: 0;
+    padding: 12px;
+    overflow-y: auto;
+  }
+  .menu-stack {
+    width: 100%;
+    gap: 12px;
+    padding: 10px 0 16px;
+  }
+  .main-title {
+    font-size: clamp(46px, 16vw, 72px);
+    letter-spacing: 1px;
+    text-shadow: 2px 2px 0 rgba(255,255,255,.8), 4px 4px 0 rgba(245,184,0,.95);
+  }
+  .menu-heading { font-size: clamp(1.8rem, 11vw, 3rem); }
+  .profile-screen .hero-card,
+  .reveal-screen .reveal-card,
+  .game-over-screen .winner-card,
+  .game-over-screen .leaderboard-panel {
+    border-width: 3px;
+    border-radius: 22px;
+    box-shadow: 5px 5px 0 var(--menu-outline);
+  }
+  .hero-card { padding: 20px; }
+  .profile-screen .primary-button,
+  .reveal-screen .primary-button,
+  .game-over-screen .primary-button,
+  .profile-screen .ghost-button,
+  .reveal-screen .ghost-button,
+  .game-over-screen .ghost-button {
+    min-height: 48px;
+    border-radius: 16px;
+  }
+  .reveal-screen .top-bar {
+    width: 100%;
+    gap: 10px;
+    align-items: stretch;
+    text-align: center;
+    box-shadow: 4px 4px 0 var(--menu-outline);
+  }
+  .reveal-screen .top-bar h2 { width: 100%; }
+  .reveal-screen .reveal-grid { width: 100%; grid-template-columns: 1fr; }
   .game-screen.active { display: block; height: 100dvh; overflow: hidden; }
   .game-shell {
     height: 100dvh;
