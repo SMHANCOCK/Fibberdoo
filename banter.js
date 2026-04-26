@@ -15,6 +15,44 @@
     'fresh cup', 'little beginner', 'brand-new menace'
   ];
 
+  var NEUTRAL_FALLBACKS = [
+    'That is dodgy.',
+    'Someone is getting brave.',
+    'That smells wrong.',
+    'This table has gone weird.',
+    'Bold move.'
+  ];
+
+  var DICE_LOSS_TARGETED = [
+    '[loser], unlucky.',
+    'Ouch, [loser].',
+    'Not so clever now, [loser].',
+    '[loser] has been done there.',
+    'Rough one, [loser].'
+  ];
+
+  var DICE_LOSS_RANK_ONE = [
+    'Number one just blinked.',
+    'Crown slipped there.',
+    'Top of the board, bottom of that call.'
+  ];
+
+  var DICE_LOSS_NEW_PLAYER = [
+    'Ouch, newbie.',
+    'First-timer tax.',
+    'Welcome to the table.'
+  ];
+
+  var DICE_LOSS_STYLE_LINES = {
+    cocky: ['Haha!', 'Sit down.', 'Back in your box.', 'Absolutely mugged.'],
+    aggressive: ['Proper punished.', 'Sit down.', 'That is a stinker.', 'Had a mare there.'],
+    angry: ['Back in your box.', 'Proper punished.', 'You have been done there.', 'That aged badly.'],
+    calm: ['Oh dear.', 'Unlucky.', 'Dice tax paid.', 'That hurt.'],
+    cautious: ['Ouch.', 'That hurt.', 'Unlucky.', 'That has gone badly.'],
+    nervous: ['Ouch.', 'Unlucky.', 'That hurt.'],
+    chaotic: ['Tiny cube funeral.', 'Dice tax paid.', 'Hahaha, brutal.', 'The cup demanded payment.']
+  };
+
   var PHRASES = {
     afterSafeBid: [
       'That is a bit cheeky.', 'Sensible. Boring, but sensible.', 'Annoyingly reasonable.', 'Safe little nudge.', 'Not much to shout about.', 'Tiny raise, fair enough.', 'That will do.', 'Steady little bid.', 'Hard to mock that.', 'Very tidy. Very dull.', 'Keeping it polite.', 'No drama there.', 'That is probably fine.', 'Quietly annoying bid.'
@@ -48,6 +86,9 @@
     ],
     afterDiceLoss: [
       'There goes one.', 'Careful now.', 'You are leaking dice.', 'That one hurt.', 'Cup got lighter.', 'Rough little loss.', 'Dice tax paid.', 'Unlucky, mate.', 'That is painful.', 'One less lie available.', 'Mind the gap.', 'That was a wobble.'
+    ],
+    diceLossLaughs: [
+      'Haha!', 'Unlucky!', 'Ouch.', 'That hurt.', 'Hahaha, brutal.', 'Not so clever now, big man.', 'Sit down.', 'Had a mare there.', 'That has gone badly.', 'You hate to see it. I love to see it.', 'Oh dear.', 'That was beautiful.', 'Absolutely mugged.', 'Proper punished.', 'That is a stinker.', 'Dice tax paid.', 'Back in your box.', 'Someone has gone quiet.', 'That aged badly.', 'You have been done there.'
     ],
     lowDiceNerves: [
       'No heroics now.', 'Playing survival now.', 'Not dying on that bid.', 'Keeping it sensible.', 'That is too rich for me.', 'I am not gifting my last die.', 'Small cup, big stress.', 'Careful from here.', 'One mistake and I am cooked.', 'Not throwing dice away.', 'Survival mode.', 'That is a bit much.'
@@ -299,12 +340,99 @@
       nickname: context.nickname || pickFreshNickname()
     };
   }
+  function isIntroductionEvent(event) {
+    return event === 'aiIntroduction' || EVENT_ALIASES[event] === 'aiIntroduction';
+  }
+  function safeNameIncludes(line, name) {
+    return !!(line && name && line.toLowerCase().indexOf(String(name).toLowerCase()) !== -1);
+  }
+  function contextPlayers(context) {
+    context = context || {};
+    return context.players || context.allPlayers || (context.roundState && context.roundState.players) || [];
+  }
+  function isValidSpeechPlayer(player, speaker) {
+    return !!(player && !player.empty && !player.eliminated && (!speaker || player.id !== speaker.id));
+  }
+  function getValidSpeechTarget(speaker, context) {
+    return contextPlayers(context).filter(function (p) { return isValidSpeechPlayer(p, speaker); });
+  }
+  function firstValidSpeechTarget(speaker, context) {
+    var targets = getValidSpeechTarget(speaker, context);
+    return targets.length ? targets[0] : null;
+  }
+  function resolveSpeechPlayer(value, speaker, context) {
+    if (isValidSpeechPlayer(value, speaker)) return value;
+    if (typeof value === 'string') {
+      var match = contextPlayers(context).find(function (p) { return p && p.name === value; });
+      if (isValidSpeechPlayer(match, speaker)) return match;
+    }
+    return firstValidSpeechTarget(speaker, context);
+  }
+  function canGenerateDudoPressure(context) {
+    context = context || {};
+    var next = context.nextPlayer;
+    var roundState = context.roundState || {};
+    if (!context.currentBid && !roundState.currentBid) return false;
+    if (context.phase !== 'awaitingDecision') return false;
+    if (context.dudoCalled || context.calzaCalled) return false;
+    if (!isValidSpeechPlayer(next, null)) return false;
+    if (window.canCallDudo) return !!window.canCallDudo(next, roundState);
+    return next.id !== roundState.previousBidderId;
+  }
+  function placeholderValue(name, speaker, context, event) {
+    var intro = isIntroductionEvent(event);
+    var target = resolveSpeechPlayer(context.target || context.bidder || context.caller, speaker, context);
+    if (name === 'playerName') return intro ? speaker && speaker.name : target && target.name;
+    if (name === 'targetName') return target && target.name;
+    if (name === 'nextPlayer') return canGenerateDudoPressure(context) && context.nextPlayer && context.nextPlayer.name;
+    if (name === 'lastBidder') return resolveSpeechPlayer(context.lastBidderPlayer || context.bidder || context.lastBidder, speaker, context) && resolveSpeechPlayer(context.lastBidderPlayer || context.bidder || context.lastBidder, speaker, context).name;
+    if (name === 'bidder') return resolveSpeechPlayer(context.bidder, speaker, context) && resolveSpeechPlayer(context.bidder, speaker, context).name;
+    if (name === 'caller') return resolveSpeechPlayer(context.caller, speaker, context) && resolveSpeechPlayer(context.caller, speaker, context).name;
+    if (name === 'loser') return context.loser && context.loser.id !== (speaker && speaker.id) && !context.loser.empty ? context.loser.name : '';
+    if (name === 'quantity') return context.quantity || context.bid && context.bid.quantity || '?';
+    if (name === 'face') return context.face || faceLabel(context.bid && context.bid.face);
+    if (name === 'currentBid') return context.currentBid || (context.bid && context.bid.quantity ? context.bid.quantity + ' ' + faceLabel(context.bid.face) : 'that bid');
+    if (name === 'nickname') return context.nickname || pickFreshNickname();
+    return '';
+  }
+  function renderSpeechTemplate(template, context) {
+    context = context || {};
+    var speaker = context.speaker;
+    var event = context.event || '';
+    var rendered = template;
+    var unsafe = false;
+    rendered = rendered.replace(/\[(playerName|targetName|nextPlayer|lastBidder|bidder|caller|loser|quantity|face|currentBid|nickname)\]/g, function (match, name) {
+      var value = placeholderValue(name, speaker, context, event);
+      if (value == null || value === '') unsafe = true;
+      return value || '';
+    });
+    if (unsafe) return '';
+    if (!isIntroductionEvent(event) && speaker && safeNameIncludes(rendered, speaker.name)) return '';
+    return rendered;
+  }
   function applyTemplate(line, data) {
     return line.replace(/\[playerName\]/g, data.playerName).replace(/\[targetName\]/g, data.targetName).replace(/\[nextPlayer\]/g, data.nextPlayer).replace(/\[quantity\]/g, data.quantity).replace(/\[face\]/g, data.face).replace(/\[lastBidder\]/g, data.lastBidder).replace(/\[currentBid\]/g, data.currentBid).replace(/\[nickname\]/g, data.nickname);
   }
   function formatTargetedLine(line, target) { return target ? line.replace('{target}', target.name) : line.replace('{target}, ', '').replace('{target}', ''); }
+  function pickSafeFreshLine(pool, speaker, context, event) {
+    pool = pool && pool.length ? pool : PHRASES.afterRiskyBid;
+    context = Object.assign({}, context || {}, { speaker: speaker, event: event });
+    var candidates = pool.filter(function (line) { return !hasRecent(line, speaker); });
+    candidates = (candidates.length ? candidates : pool).slice();
+    while (candidates.length) {
+      var index = Math.floor(Math.random() * candidates.length);
+      var template = candidates.splice(index, 1)[0];
+      var rendered = renderSpeechTemplate(template, context);
+      if (rendered) {
+        remember(rendered, speaker);
+        return rendered;
+      }
+    }
+    return pickFreshForSpeaker(NEUTRAL_FALLBACKS, speaker);
+  }
   function poolForEvent(event, context) {
     var risk = context && context.risk;
+    if ((EVENT_ALIASES[event] || event) === 'pressureDudo' && !canGenerateDudoPressure(context)) return PHRASES.afterRiskyBid;
     if ((event === 'afterBid' || event === 'afterHumanBid' || event === 'afterAiBid') && (risk === 'absurd')) return PHRASES.afterAbsurdBid;
     if ((event === 'afterBid' || event === 'afterHumanBid' || event === 'afterAiBid') && (risk === 'high' || risk === 'dangerous')) return PHRASES.afterRiskyBid;
     return PHRASES[EVENT_ALIASES[event] || event] || PHRASES.afterRiskyBid;
@@ -318,7 +446,7 @@
   }
   function getEventLine(event, speaker, context) {
     context = context || {};
-    var target = context.target || context.bidder || context.caller;
+    var target = resolveSpeechPlayer(context.target || context.bidder || context.caller, speaker, context);
     var pool = poolForEvent(event, context).slice();
     var isPressure = event === 'pressureDudo' || event === 'beforeNextPlayerDecision' || EVENT_ALIASES[event] === 'pressureDudo';
     if (!isPressure) {
@@ -329,7 +457,7 @@
       var rankPool = getRankBanterPool(speaker, target);
       if (rankPool.length && Math.random() < 0.42) pool = pool.concat(rankPool);
     }
-    return applyTemplate(pickFreshForSpeaker(pool, speaker), templateContext(speaker, target, context));
+    return pickSafeFreshLine(pool, speaker, Object.assign({}, context, { target: target }), event);
   }
   function getAiIntroLine(aiPlayer, humanPlayer) {
     var animalIntros = {
@@ -347,11 +475,11 @@
     var animal = getAnimalType(aiPlayer);
     var line = animalIntros[animal] || getEventLine('aiIntroduction', aiPlayer, { target: humanPlayer, playerName: aiPlayer.name });
     remember(line, aiPlayer);
-    return applyTemplate(line, templateContext(aiPlayer, humanPlayer, { playerName: aiPlayer.name }));
+    return renderSpeechTemplate(line, { speaker: aiPlayer, event: 'aiIntroduction', target: humanPlayer, players: [aiPlayer, humanPlayer], playerName: aiPlayer.name }) || line;
   }
   function getSlowTurnTaunt(speaker, humanPlayer, delayLevel) {
     var pool = SLOW_TURN_TAUNTS[Math.max(1, Math.min(3, Number(delayLevel) || 1))] || PHRASES.slowTurnTaunts;
-    return applyTemplate(pickFreshForSpeaker(pool, speaker), templateContext(speaker, humanPlayer, { targetName: humanPlayer && humanPlayer.name || 'mate' }));
+    return pickSafeFreshLine(pool, speaker, { target: humanPlayer, players: [speaker, humanPlayer].filter(Boolean), targetName: humanPlayer && humanPlayer.name || 'mate' }, 'slowTurnTaunts');
   }
   function getOpeningBanter(players, humanPlayer) {
     var aiPlayers = (players || []).filter(function (p) { return p && p.ai && !p.empty && !p.eliminated; });
@@ -391,7 +519,7 @@
   }
   function getLeaderboardBanterLine(player, target) {
     var badge = window.getLeaderboardRankBadge ? window.getLeaderboardRankBadge(player.name) : 'New';
-    return applyTemplate('[playerName], rank ' + badge + ' has gone to your head.', templateContext(player, target || player, {}));
+    return renderSpeechTemplate('[playerName], rank ' + badge + ' has gone to your head.', { speaker: player, target: target, players: [player, target].filter(Boolean), event: 'leaderboard' }) || pickFreshForSpeaker(NEUTRAL_FALLBACKS, player);
   }
   function chanceForEvent(event, risk) {
     var level = getBanterLevel();
@@ -406,7 +534,7 @@
     return Math.max(0.05, Math.min(0.92, base));
   }
   function getTableReactions(event, players, context) {
-    context = context || {};
+    context = Object.assign({ players: players || [] }, context || {});
     var risk = context.risk || 'medium';
     if (Math.random() > chanceForEvent(event, risk)) return [];
     if (Math.random() < 0.15) return [];
@@ -421,9 +549,68 @@
       var speaker = candidates.splice(Math.floor(Math.random() * candidates.length), 1)[0];
       reactions.push({ speaker: speaker, line: getEventLine(event, speaker, context), target: context.target || context.bidder || context.caller });
     }
-    if ((risk === 'high' || risk === 'absurd') && context.nextPlayer && reactions.length < 3 && Math.random() < 0.65) {
+    var pressureEvent = event === 'afterBid' || event === 'afterHumanBid' || event === 'afterAiBid' || event === 'beforeNextPlayerDecision' || event === 'pressureNextPlayer';
+    if (pressureEvent && canGenerateDudoPressure(context) && (risk === 'high' || risk === 'absurd') && context.nextPlayer && reactions.length < 3 && Math.random() < 0.65) {
       var pressureSpeaker = candidates[0] || reactions[0] && reactions[0].speaker;
       if (pressureSpeaker && pressureSpeaker.ai) reactions.push({ speaker: pressureSpeaker, line: getEventLine('pressureDudo', pressureSpeaker, context), target: context.nextPlayer });
+    }
+    return reactions;
+  }
+  function diceLossMockChance(speaker) {
+    var style = getPlayStyle(speaker);
+    var mood = speaker && (speaker.moodLevel || speaker.mood) || 'calm';
+    var chance = 1;
+    if (style === 'cocky' || style === 'aggressive') chance += 3;
+    if (style === 'chaotic') chance += 2;
+    if (style === 'calm') chance += 1;
+    if (style === 'cautious') chance -= 0.5;
+    if (style === 'nervous' || mood === 'nervous') chance -= 1.25;
+    if (mood === 'angry') chance += 3;
+    if (mood === 'cocky' || mood === 'confident') chance += 1.5;
+    return Math.max(0.2, chance);
+  }
+  function diceLossPoolForSpeaker(speaker, loser, context) {
+    var pool = PHRASES.diceLossLaughs.slice();
+    var style = getPlayStyle(speaker);
+    var mood = speaker && (speaker.moodLevel || speaker.mood) || style;
+    if (DICE_LOSS_STYLE_LINES[style]) pool = pool.concat(DICE_LOSS_STYLE_LINES[style]);
+    if (DICE_LOSS_STYLE_LINES[mood]) pool = pool.concat(DICE_LOSS_STYLE_LINES[mood]);
+    if (Math.random() < 0.28) pool = pool.concat(DICE_LOSS_TARGETED);
+    var rank = getRankNumber(loser);
+    if (rank === 1 && Math.random() < 0.65) pool = DICE_LOSS_RANK_ONE.concat(pool);
+    if (isNewPlayer(loser) && Math.random() < 0.65) pool = DICE_LOSS_NEW_PLAYER.concat(pool);
+    return pool;
+  }
+  function getDiceLossLaughReactions(players, loser, context) {
+    context = Object.assign({ players: players || [], loser: loser, target: loser, event: 'diceLossLaughs' }, context || {});
+    var roll = typeof context.forceRoll === 'number' ? context.forceRoll : Math.random();
+    var count = roll < 0.2 ? 2 : roll < 0.6 ? 1 : 0;
+    if (!count) return [];
+    var candidates = (players || []).filter(function (p) {
+      return p && p.ai && !p.empty && !p.eliminated && (!loser || p.id !== loser.id);
+    });
+    if (!candidates.length) return [];
+    candidates = candidates.map(function (speaker) {
+      return { speaker: speaker, weight: diceLossMockChance(speaker) };
+    }).sort(function (a, b) { return b.weight - a.weight; });
+    var reactions = [];
+    while (reactions.length < Math.min(2, count) && candidates.length) {
+      var total = candidates.reduce(function (sum, item) { return sum + item.weight; }, 0);
+      var pickValue = Math.random() * total;
+      var pickedIndex = 0;
+      for (var i = 0; i < candidates.length; i += 1) {
+        pickValue -= candidates[i].weight;
+        if (pickValue <= 0) { pickedIndex = i; break; }
+      }
+      var item = candidates.splice(pickedIndex, 1)[0];
+      var pool = diceLossPoolForSpeaker(item.speaker, loser, context);
+      if (context.forceRankLine) pool = DICE_LOSS_RANK_ONE.slice();
+      if (context.forceNewLine) pool = DICE_LOSS_NEW_PLAYER.slice();
+      reactions.push({
+        speaker: item.speaker,
+        line: pickSafeFreshLine(pool, item.speaker, Object.assign({}, context, { speaker: item.speaker, loser: loser, target: loser }), 'diceLossLaughs'),
+        target: loser
+      });
     }
     return reactions;
   }
@@ -434,10 +621,12 @@
     var old = seat.querySelector('.speech-bubble');
     if (old) old.remove();
     var bubble = document.createElement('div');
-    bubble.className = 'speech-bubble';
+    bubble.className = 'speech-bubble' + (speech.variant ? ' ' + speech.variant : '');
     bubble.textContent = speech.line;
     var anchor = seat.querySelector('.avatar-line') || seat.firstChild;
     seat.insertBefore(bubble, anchor);
+    var lineHeight = parseFloat(window.getComputedStyle ? window.getComputedStyle(bubble).lineHeight : '0') || 16;
+    if (bubble.scrollHeight > lineHeight * 2.4) bubble.classList.add('speech-bubble-tall');
   }
   function restoreSpeechBubbles() {
     Object.keys(activeSpeech).forEach(function (playerId) {
@@ -445,11 +634,12 @@
       else renderSpeechBubble(playerId);
     });
   }
-  function showSpeechBubble(playerId, line) {
-    if (!line || playerId === 'human') return;
+  function showSpeechBubble(playerId, line, variant, options) {
+    options = options || {};
+    if (!line || (playerId === 'human' && !options.allowHuman)) return;
     var existing = activeSpeech[playerId];
     if (existing && existing.timer) clearTimeout(existing.timer);
-    activeSpeech[playerId] = { line: line, expiresAt: Date.now() + SPEECH_MINIMUM_MS, timer: setTimeout(function () {
+    activeSpeech[playerId] = { line: line, variant: variant || '', expiresAt: Date.now() + SPEECH_MINIMUM_MS, timer: setTimeout(function () {
       delete activeSpeech[playerId];
       var current = document.querySelector('[data-player-id="' + playerId + '"] .speech-bubble');
       if (current) current.remove();
@@ -477,7 +667,27 @@
     var savedLevel = localStorage.getItem('perudoBanterLevel');
     localStorage.setItem('perudoBanterLevel', '3');
     var players = [{ id: 'a', name: 'Mia', avatar: '🦊', animalType: 'fox', ai: true, diceCount: 5 }, { id: 'human', name: 'Steve', avatar: '😎', human: true, diceCount: 5 }, { id: 'c', name: 'Raj', avatar: '🐻', animalType: 'bear', ai: true, diceCount: 1 }];
-    var pressure = getEventLine('pressureDudo', players[0], { nextPlayer: players[2], bidder: players[1], target: players[1], bid: { quantity: 8, face: 2 }, currentBid: '8 twos', risk: 'absurd' });
+    var pressureRoundState = { players: players, currentBid: { quantity: 8, face: 2 }, previousBidderId: 'human', turnIndex: 2 };
+    var validPressureContext = { players: players, nextPlayer: players[2], bidder: players[1], target: players[1], bid: { quantity: 8, face: 2 }, currentBid: '8 twos', risk: 'absurd', phase: 'awaitingDecision', roundState: pressureRoundState };
+    var pressure = getEventLine('pressureDudo', players[0], validPressureContext);
+    var selfTargetLine = getEventLine('afterBid', players[0], { players: players, bidder: players[0], target: players[0], risk: 'high', bid: { quantity: 5, face: 2 }, currentBid: '5 twos' });
+    var afterDudoPressure = getEventLine('pressureDudo', players[0], Object.assign({}, validPressureContext, { phase: 'dudoCalled', dudoCalled: true }));
+    var revealPressure = getEventLine('pressureDudo', players[0], Object.assign({}, validPressureContext, { phase: 'diceReveal', dudoCalled: true }));
+    var eliminatedTarget = Object.assign({}, players[2], { eliminated: true });
+    var eliminatedLine = getEventLine('afterBid', players[0], { players: [players[0], players[1], eliminatedTarget], target: eliminatedTarget, bidder: players[1], risk: 'high' });
+    var fallbackLine = getEventLine('pressureDudo', players[0], { players: [players[0]], nextPlayer: players[0], target: players[0], phase: 'awaitingDecision', currentBid: '8 twos', roundState: { players: [players[0]], currentBid: { quantity: 8, face: 2 }, previousBidderId: 'x' } });
+    var introSelfLine = renderSpeechTemplate('Name is [playerName].', { speaker: players[0], event: 'aiIntroduction', players: players, target: players[1] });
+    var invalidTablePressure = getTableReactions('afterDudoCalled', players, Object.assign({}, validPressureContext, { phase: 'dudoCalled', dudoCalled: true, risk: 'absurd' }));
+    var lossLoser = { id: 'loser', name: 'Steve', human: true, diceCount: 4, leaderboardRank: 12 };
+    var lossSpeakers = [
+      { id: 'cocky', name: 'Ducky Dan', ai: true, diceCount: 5, playStyle: 'cocky', moodLevel: 'cocky' },
+      { id: 'calm', name: 'Oxford Owl', ai: true, diceCount: 4, playStyle: 'calm', moodLevel: 'calm' },
+      lossLoser
+    ];
+    var lossLaughs = getDiceLossLaughReactions(lossSpeakers, lossLoser, { forceRoll: 0.1, players: lossSpeakers });
+    var oneLossLaugh = getDiceLossLaughReactions(lossSpeakers, lossLoser, { forceRoll: 0.3, players: lossSpeakers });
+    var newLossLaugh = getDiceLossLaughReactions(lossSpeakers, Object.assign({}, lossLoser, { leaderboardRank: null, rankLabel: 'New' }), { forceRoll: 0.3, forceNewLine: true, players: lossSpeakers });
+    var rankOneLaugh = getDiceLossLaughReactions(lossSpeakers, Object.assign({}, lossLoser, { leaderboardRank: 1 }), { forceRoll: 0.3, forceRankLine: true, players: lossSpeakers });
     var humanLine = getBanterLine(players[1], 'bid', null, { bid: { quantity: 4, face: 2 } });
     var reactions = getTableReactions('afterHumanBid', players, { bidder: players[1], target: players[1], nextPlayer: players[2], bid: { quantity: 8, face: 2 }, currentBid: '8 twos', risk: 'absurd' });
     var lowDice = getEventLine('afterBid', players[2], { bidder: players[1], target: players[1], risk: 'high' });
@@ -526,10 +736,25 @@
       metAiSavedToLocalStorage: introAfter,
       introDoesNotBreakTurnOrder: opening.length <= 7,
       noRepeatedNicknameSpam: new Set(nicknameRepeats.slice(-8)).size === nicknameRepeats.slice(-8).length,
-      slowTurnTauntExists: typeof slowTaunt === 'string' && slowTaunt.length > 0
+      slowTurnTauntExists: typeof slowTaunt === 'string' && slowTaunt.length > 0,
+      aiDoesNotTargetItself: selfTargetLine.indexOf('Mia') === -1,
+      aiDoesNotSayOwnNameExceptIntro: selfTargetLine.indexOf('Mia') === -1 && introSelfLine.indexOf('Mia') !== -1,
+      pressureOnlyBeforeDudoCalza: canGenerateDudoPressure(validPressureContext) && !canGenerateDudoPressure(Object.assign({}, validPressureContext, { dudoCalled: true })) && !canGenerateDudoPressure(Object.assign({}, validPressureContext, { calzaCalled: true })),
+      noCallDudoAfterDudo: afterDudoPressure.toLowerCase().indexOf('dudo') === -1 && afterDudoPressure.toLowerCase().indexOf('call it') === -1,
+      noCallDudoDuringReveal: revealPressure.toLowerCase().indexOf('dudo') === -1 && revealPressure.toLowerCase().indexOf('call it') === -1,
+      noStaleNextPlayerAfterDudo: invalidTablePressure.every(function (reaction) { return reaction.line.indexOf('Raj') === -1 && reaction.line.toLowerCase().indexOf('dudo') === -1; }),
+      eliminatedPlayersNotSpeechTargets: eliminatedLine.indexOf('Raj') === -1,
+      fallbackPhraseWorksIfTargetsInvalid: NEUTRAL_FALLBACKS.indexOf(fallbackLine) !== -1,
+      introductionsMayIncludeOwnName: introSelfLine.indexOf('Mia') !== -1,
+      diceLossLaughCanTrigger: oneLossLaugh.length === 1,
+      diceLossLoserNeverMocksSelf: lossLaughs.every(function (reaction) { return reaction.speaker.id !== lossLoser.id; }),
+      diceLossSpeakerNeverSaysOwnName: lossLaughs.every(function (reaction) { return reaction.line.indexOf(reaction.speaker.name) === -1; }),
+      newPlayerLossUsesNewPhrases: newLossLaugh.length > 0 && DICE_LOSS_NEW_PLAYER.indexOf(newLossLaugh[0].line) !== -1,
+      rankOneLossUsesRankPhrases: rankOneLaugh.length > 0 && DICE_LOSS_RANK_ONE.indexOf(rankOneLaugh[0].line) !== -1,
+      diceLossLaughsMaxTwo: lossLaughs.length <= 2
     };
   }
 
-  window.PerudoBanter = { maybeSpeak: maybeSpeak, maybeSpectatorSpeak: maybeSpectatorSpeak, getBanterLine: getBanterLine, getLeaderboardBanterLine: getLeaderboardBanterLine, formatTargetedLine: formatTargetedLine, showSpeechBubble: showSpeechBubble, restoreSpeechBubbles: restoreSpeechBubbles, PHRASES: PHRASES, validatePhraseBank: validatePhraseBank, getBidRiskLevel: getBidRiskLevel, getTableReactions: getTableReactions, getEventLine: getEventLine, getBanterLevel: getBanterLevel, setBanterLevel: setBanterLevel, getAnimalType: getAnimalType, getPlayStyle: getPlayStyle, getRankBanterPool: getRankBanterPool, isNewPlayer: isNewPlayer, hasMetAi: hasMetAi, markAiMet: markAiMet, getOpeningBanter: getOpeningBanter, getNewPlayerReactions: getNewPlayerReactions, getSlowTurnTaunt: getSlowTurnTaunt, validateBanterSystem: validateBanterSystem };
+  window.PerudoBanter = { maybeSpeak: maybeSpeak, maybeSpectatorSpeak: maybeSpectatorSpeak, getBanterLine: getBanterLine, getLeaderboardBanterLine: getLeaderboardBanterLine, formatTargetedLine: formatTargetedLine, showSpeechBubble: showSpeechBubble, restoreSpeechBubbles: restoreSpeechBubbles, PHRASES: PHRASES, validatePhraseBank: validatePhraseBank, getBidRiskLevel: getBidRiskLevel, getTableReactions: getTableReactions, getEventLine: getEventLine, getBanterLevel: getBanterLevel, setBanterLevel: setBanterLevel, getAnimalType: getAnimalType, getPlayStyle: getPlayStyle, getRankBanterPool: getRankBanterPool, isNewPlayer: isNewPlayer, hasMetAi: hasMetAi, markAiMet: markAiMet, getOpeningBanter: getOpeningBanter, getNewPlayerReactions: getNewPlayerReactions, getSlowTurnTaunt: getSlowTurnTaunt, getDiceLossLaughReactions: getDiceLossLaughReactions, getValidSpeechTarget: getValidSpeechTarget, canGenerateDudoPressure: canGenerateDudoPressure, renderSpeechTemplate: renderSpeechTemplate, validateBanterSystem: validateBanterSystem };
   Object.assign(window, window.PerudoBanter);
 })();

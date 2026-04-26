@@ -1,7 +1,9 @@
 ﻿(function () {
   var SKILL_KEY = 'perudoAiSkillLevel';
   var MEMORY_KEY = 'perudoAiMemory';
+  var TEMPO_KEY = 'perudoBidTempo';
   var SKILL_LEVELS = ['easy', 'normal', 'hard', 'expert'];
+  var BID_TEMPOS = ['cautious', 'steady', 'aggressive'];
 
   var namePools = {
     '🐺': ['Wolfgang', 'Lone Wolf Leo', 'Howler Harry'],
@@ -30,6 +32,21 @@
   }
   function setAiSkillLevel(level) {
     localStorage.setItem(SKILL_KEY, SKILL_LEVELS.indexOf(level) === -1 ? 'hard' : level);
+  }
+  function getBidTempo() {
+    var saved = localStorage.getItem(TEMPO_KEY) || 'steady';
+    return BID_TEMPOS.indexOf(saved) === -1 ? 'steady' : saved;
+  }
+  function setBidTempo(tempo) {
+    localStorage.setItem(TEMPO_KEY, BID_TEMPOS.indexOf(tempo) === -1 ? 'steady' : tempo);
+  }
+  function tempoProfile(roundState) {
+    var tempo = (roundState && roundState.bidTempo) || getBidTempo();
+    return {
+      cautious: { openingAdjust: -1, openingBias: -4, jumpPenalty: 1.35, bigJumpChance: .025, dudoOpeningMultiplier: .12 },
+      steady: { openingAdjust: 0, openingBias: 0, jumpPenalty: 1, bigJumpChance: .055, dudoOpeningMultiplier: .2 },
+      aggressive: { openingAdjust: 1, openingBias: 4, jumpPenalty: .78, bigJumpChance: .1, dudoOpeningMultiplier: .32 }
+    }[tempo] || { openingAdjust: 0, openingBias: 0, jumpPenalty: 1, bigJumpChance: .055, dudoOpeningMultiplier: .2 };
   }
   function skillProfile(level) {
     return {
@@ -326,6 +343,120 @@
     return confidence;
   }
   function getLegalBidOptions(player, roundState) { return window.getLegalBids ? window.getLegalBids(player, roundState) : []; }
+  function getOpeningQuantityBand(totalDice) {
+    if (totalDice >= 25) return { min: 3, max: 5, ideal: 4 };
+    if (totalDice >= 18) return { min: 2, max: 4, ideal: 3 };
+    if (totalDice >= 10) return { min: 1, max: 3, ideal: 2 };
+    return { min: 1, max: 2, ideal: 1.5 };
+  }
+  function getStrongestOpeningSupport(player, roundState) {
+    var faces = isPalafico(roundState) ? [1, 2, 3, 4, 5, 6] : [2, 3, 4, 5, 6];
+    return faces.reduce(function (best, face) { return Math.max(best, getFaceCountInOwnDice(player, face, roundState)); }, 0);
+  }
+  function hasStrongBidEvidence(player, bid, roundState) {
+    var ownSupport = getFaceCountInOwnDice(player, bid.face, roundState);
+    var dice = getKnownDiceForPlayer(player).length || player.diceCount || 0;
+    if (isPalafico(roundState)) return ownSupport >= Math.min(2, dice);
+    return ownSupport >= Math.min(3, dice) || ownSupport >= Math.max(2, Math.ceil(Number(bid.quantity) * .55));
+  }
+  function getMaxReasonableOpeningBid(totalDice, player, roundState) {
+    var maxOpening = Math.ceil(totalDice / 6) + 1;
+    var style = player.playStyle || 'calm';
+    var mood = player.moodLevel || player.mood || 'calm';
+    var skillLevel = roundState.aiSkillLevel || getAiSkillLevel();
+    maxOpening += tempoProfile(roundState).openingAdjust;
+    if (style === 'aggressive' || style === 'cocky' || mood === 'angry' || mood === 'cocky') maxOpening += 1;
+    if (skillLevel === 'expert' && getStrongestOpeningSupport(player, roundState) >= 4) maxOpening += 1;
+    if ((Number(player.diceCount) || 0) <= 2) maxOpening -= 1;
+    return clamp(maxOpening, 1, Math.max(1, totalDice));
+  }
+  function getOpeningHardCap(totalDice) {
+    return Math.max(1, Math.ceil(totalDice / 4));
+  }
+  function shouldAllowRareOpeningBluff(player, roundState) {
+    if (roundState.forceRareOpeningBluff === true) return true;
+    if (roundState.forceRareOpeningBluff === false) return false;
+    var style = player.playStyle || 'calm';
+    var mood = player.moodLevel || player.mood || 'calm';
+    var chance = tempoProfile(roundState).bigJumpChance;
+    if (style === 'aggressive' || style === 'cocky' || style === 'chaotic') chance += .025;
+    if (mood === 'angry' || mood === 'cocky') chance += .02;
+    if ((Number(player.diceCount) || 0) <= 2) chance *= .35;
+    return Math.random() < clamp(chance, 0, .16);
+  }
+  function getOpeningBidCap(player, roundState, rareBluff) {
+    var totalDice = getTotalDiceInPlay(roundState);
+    var hardCap = getOpeningHardCap(totalDice);
+    var cap = Math.min(getMaxReasonableOpeningBid(totalDice, player, roundState), hardCap);
+    if (rareBluff) return Math.min(totalDice, hardCap + 3);
+    return cap;
+  }
+  function getBidJumpSize(previousBid, newBid) {
+    if (!previousBid || !newBid) return newBid ? Number(newBid.quantity) || 0 : 0;
+    var previousAce = Number(previousBid.face) === 1;
+    var newAce = Number(newBid.face) === 1;
+    if (!previousAce && !newAce) return Math.max(0, Number(newBid.quantity) - Number(previousBid.quantity));
+    if (previousAce && newAce) return Math.max(0, Number(newBid.quantity) - Number(previousBid.quantity));
+    if (!previousAce && newAce) {
+      var minAce = window.getMinimumAceBid ? window.getMinimumAceBid(previousBid) : Math.ceil(Number(previousBid.quantity) / 2);
+      return Math.max(1, Number(newBid.quantity) - minAce + 1);
+    }
+    var minNormal = window.getMinimumNormalBidFromAces ? window.getMinimumNormalBidFromAces(previousBid) : Number(previousBid.quantity) * 2 + 1;
+    return Math.max(1, Number(newBid.quantity) - minNormal + 1);
+  }
+  function shouldAllowBigBidJump(player, roundState) {
+    if (roundState.forceBigBidJump === true) return true;
+    if (roundState.forceBigBidJump === false) return false;
+    var style = player.playStyle || 'calm';
+    var mood = player.moodLevel || player.mood || 'calm';
+    var chance = tempoProfile(roundState).bigJumpChance;
+    if (style === 'aggressive' || style === 'cocky') chance += .055;
+    if (style === 'chaotic') chance += .045;
+    if (mood === 'angry' || mood === 'cocky') chance += .04;
+    if ((Number(player.diceCount) || 0) <= 2) chance *= .4;
+    return Math.random() < clamp(chance, 0, .24);
+  }
+  function openingTempoScore(bid, player, roundState) {
+    if (roundState.currentBid || isPalafico(roundState)) return 0;
+    var totalDice = getTotalDiceInPlay(roundState);
+    var band = getOpeningQuantityBand(totalDice);
+    var quantity = Number(bid.quantity) || 0;
+    var hardCap = getOpeningHardCap(totalDice);
+    var maxReasonable = getMaxReasonableOpeningBid(totalDice, player, roundState);
+    var profile = tempoProfile(roundState);
+    var score = 20 + profile.openingBias;
+    score -= Math.abs(quantity - band.ideal) * 10;
+    if (quantity >= band.min && quantity <= band.max) score += 22;
+    if (quantity < band.min) score -= (band.min - quantity) * 5;
+    if (quantity > band.max) score -= (quantity - band.max) * 24;
+    if (quantity > maxReasonable) score -= (quantity - maxReasonable) * 34;
+    if (quantity > hardCap) score -= (quantity - hardCap) * 70;
+    if (hasStrongBidEvidence(player, bid, roundState)) score += 10;
+    return score;
+  }
+  function escalationTempoScore(bid, player, roundState, appetite) {
+    var previousBid = roundState.currentBid;
+    if (!previousBid) return 0;
+    var jump = getBidJumpSize(previousBid, bid);
+    var style = player.playStyle || 'calm';
+    var mood = player.moodLevel || player.mood || 'calm';
+    var previousRisk = riskToNumber(getBidRiskLevel(previousBid, player, roundState));
+    var profile = tempoProfile(roundState);
+    var score = 0;
+    if (!isPalafico(roundState) && Number(bid.quantity) === Number(previousBid.quantity) && Number(bid.face) > Number(previousBid.face)) score += 24;
+    if (jump === 1) score += 24;
+    else if (jump === 2) score += (style === 'aggressive' || style === 'cocky' || mood === 'angry') ? 13 : 3;
+    else if (jump >= 3) {
+      score -= (26 + (jump - 2) * 22) * profile.jumpPenalty;
+      if (style === 'aggressive' || style === 'cocky' || style === 'chaotic') score += 10;
+      if (mood === 'angry' || mood === 'cocky') score += 8;
+      if (hasStrongBidEvidence(player, bid, roundState)) score += 18;
+      score += appetite * 5;
+    }
+    if (previousRisk >= 2 && jump >= 2) score -= 16 + previousRisk * 8;
+    if (previousRisk >= 3 && jump >= 3) score -= 26;
+    return score;
+  }
   function moodModifier(player, key) {
     var mood = player.moodLevel || player.mood || 'calm';
     var table = {
@@ -392,6 +523,8 @@
     score += moodModifier(player, 'bluff') * (riskNum >= 2 ? 1 : 0);
     score += moodModifier(player, 'safe') * (riskNum <= 1 ? 1 : 0);
     if (bid.face === 1 && !isPalafico(roundState)) score -= 3;
+    score += openingTempoScore(bid, player, roundState);
+    score += escalationTempoScore(bid, player, roundState, appetite);
     if (skill.bluffControl > .8 && risk === 'absurd') score -= 35;
     score += randomBetween(-skill.noise * 10, skill.noise * 10) + moodModifier(player, 'variance') * randomBetween(-1, 1);
     return score;
@@ -401,6 +534,30 @@
     var threatTarget = getNextActiveAfter(player, roundState) || getPrimaryThreatTarget(player, roundState);
     var appetite = getRiskAppetite(player, roundState, threatTarget);
     var options = getLegalBidOptions(player, roundState).filter(function (bid) { return bid.quantity <= getTotalDiceInPlay(roundState) + 1; });
+    var totalDice = getTotalDiceInPlay(roundState);
+    var rareOpeningBluff = false;
+    if (!roundState.currentBid && !isPalafico(roundState)) {
+      rareOpeningBluff = shouldAllowRareOpeningBluff(player, roundState);
+      var openingCap = getOpeningBidCap(player, roundState, rareOpeningBluff);
+      var hardCap = getOpeningHardCap(totalDice);
+      var openingOptions = options.filter(function (bid) {
+        if (bid.quantity <= openingCap) return true;
+        if (rareOpeningBluff) return bid.quantity <= Math.min(totalDice, hardCap + 3);
+        return false;
+      });
+      if (openingOptions.length) options = openingOptions;
+    }
+    if (roundState.currentBid) {
+      var allowBigJump = shouldAllowBigBidJump(player, roundState);
+      var currentRisk = riskToNumber(getBidRiskLevel(roundState.currentBid, player, roundState));
+      var gradualOptions = options.filter(function (bid) {
+        var jump = getBidJumpSize(roundState.currentBid, bid);
+        if (jump <= 2) return true;
+        if (currentRisk >= 2 && jump > 2) return false;
+        return allowBigJump || appetite > 2.4 || hasStrongBidEvidence(player, bid, roundState);
+      });
+      if (gradualOptions.length) options = gradualOptions;
+    }
     if (diceCount <= 2) {
       var survivalOptions = options.filter(function (bid) {
         var risk = getBidRiskLevel(bid, player, roundState);
@@ -457,6 +614,11 @@
     if (player.moodLevel === 'angry') chance += 0.14;
     if (player.moodLevel === 'cocky' && getTotalDiceInPlay(roundState) > 10) chance -= 0.08;
     if (player.moodLevel === 'nervous') chance += randomBetween(-0.12, 0.18);
+    if ((Number(roundState.bidCountThisRound) || 0) <= 1) {
+      var openingRisk = getBidRiskLevel(bid, player, roundState);
+      if (openingRisk === 'safe' || openingRisk === 'reasonable') chance *= tempoProfile(roundState).dudoOpeningMultiplier;
+      else if (openingRisk === 'risky') chance *= .5;
+    }
     chance *= skill.dudoAccuracy + .15;
     return clamp(chance, 0.02, 0.97);
   }
@@ -515,11 +677,11 @@
       { id: 'b', name: 'Bluffer', diceCount: 5, dice: [1, 3, 5, 6, 2] },
       { id: 'c', name: 'Raj', diceCount: 5, dice: [4, 2, 6, 3, 5] }
     ];
-    var state = { players: players, currentBid: { quantity: 8, face: 4 }, previousBidderId: 'b', turnIndex: 0, aiSkillLevel: 'hard', calzaEnabled: true, aceBidsThisRound: [], aiMemory: {}, silentThreatLog: true };
+    var state = { players: players, currentBid: { quantity: 8, face: 4 }, previousBidderId: 'b', turnIndex: 0, aiSkillLevel: 'hard', bidTempo: 'steady', bidCountThisRound: 2, calzaEnabled: true, aceBidsThisRound: [], aiMemory: {}, silentThreatLog: true };
     var expectedNormal = getExpectedFaceCount(players[0], 4, state);
     var expectedAce = getExpectedFaceCount(players[0], 1, state);
     var pal = Object.assign({}, state, { palaficoActive: true, lockedFace: 4, currentBid: { quantity: 3, face: 4 } });
-    var calmBid = chooseBestBid(players[0], Object.assign({}, state, { currentBid: null }));
+    var calmBid = chooseBestBid(players[0], Object.assign({}, state, { currentBid: null, previousBidderId: null, bidCountThisRound: 0, forceRareOpeningBluff: false }));
     var angry = Object.assign({}, players[0], { moodLevel: 'angry', playStyle: 'aggressive', personality: { bluffing: 8, caution: 2, aggression: 9, luck: 5 } });
     var cocky = Object.assign({}, players[0], { moodLevel: 'cocky', playStyle: 'cocky', personality: { bluffing: 9, caution: 3, aggression: 7, luck: 6 } });
     var nervous = Object.assign({}, players[0], { moodLevel: 'nervous', playStyle: 'chaotic', personality: { bluffing: 7, caution: 4, aggression: 5, luck: 8 } });
@@ -541,6 +703,29 @@
     var angryRankAi = Object.assign({}, rankAi, { moodLevel: 'angry', playStyle: 'aggressive', personality: { bluffing: 8, caution: 2, aggression: 9, luck: 5 } });
     var legalActions = Array.from({ length: 20 }, function () { return chooseAiAction(players[0], state); }).every(function (action) { return action.type !== 'bid' || window.isLegalBid(action.bid, state.currentBid, state, players[0]); });
     var palAction = chooseBestBid(players[0], pal);
+    var openingState = Object.assign({}, state, { currentBid: null, previousBidderId: null, bidCountThisRound: 0, forceRareOpeningBluff: false, players: [
+      Object.assign({}, players[0], { dice: [1, 4, 4, 2, 6], diceCount: 5 }),
+      Object.assign({}, players[1], { diceCount: 5 }),
+      Object.assign({}, players[2], { diceCount: 5 }),
+      { id: 'd', name: 'D', diceCount: 5, dice: [2, 3, 4, 5, 6] },
+      { id: 'e', name: 'E', diceCount: 5, dice: [2, 3, 4, 5, 6] }
+    ] });
+    var openingSamples = Array.from({ length: 18 }, function () { return chooseBestBid(openingState.players[0], Object.assign({}, openingState, { forceRareOpeningBluff: false, forceBigBidJump: false })); });
+    var openingAverage = openingSamples.reduce(function (sum, bid) { return sum + (bid ? bid.quantity : 0); }, 0) / openingSamples.length;
+    var noNineOpen = openingSamples.every(function (bid) { return bid && bid.quantity < 9; });
+    var reasonableOpenings = openingSamples.filter(function (bid) {
+      return bid && bid.quantity <= getMaxReasonableOpeningBid(25, openingState.players[0], openingState);
+    }).length >= 14;
+    var escalationState = Object.assign({}, state, { currentBid: { quantity: 4, face: 2 }, previousBidderId: 'b', bidCountThisRound: 2, forceBigBidJump: false });
+    var escalationSamples = Array.from({ length: 18 }, function () { return chooseBestBid(players[0], escalationState); });
+    var gradualRaises = escalationSamples.filter(function (bid) {
+      var jump = getBidJumpSize(escalationState.currentBid, bid);
+      return jump <= 1 || (bid.quantity === escalationState.currentBid.quantity && bid.face > escalationState.currentBid.face);
+    }).length >= 11;
+    var bigJumpState = Object.assign({}, escalationState, { forceBigBidJump: true });
+    var aggressiveBigJumpScore = getRiskAppetite(cocky, bigJumpState) > getRiskAppetite(players[0], bigJumpState) && shouldAllowBigBidJump(cocky, bigJumpState);
+    var safeOpeningBidState = Object.assign({}, openingState, { currentBid: { quantity: 4, face: 4 }, previousBidderId: 'b', bidCountThisRound: 1 });
+    var safeOpeningDudoChance = getDudoCallChance(players[0], safeOpeningBidState);
     state.aiMemory.Bluffer = createPlayerMemory();
     state.aiMemory.Bluffer.totalBids = 10; state.aiMemory.Bluffer.failedBids = 7; refreshDerivedMemory(state.aiMemory.Bluffer);
     return {
@@ -568,10 +753,17 @@
       aiNeverIllegal: legalActions,
       noIllegalPalaficoFaceChange: !palAction || window.isLegalBid(palAction, pal.currentBid, pal, players[0]),
       respectsAcesRules: !window.isLegalBid({ quantity: 1, face: 1 }, null, state, players[0]),
-      aiCalzaLegalOnly: !shouldCallCalza(players[0], Object.assign({}, state, { palaficoActive: true })) && !shouldCallCalza(players[0], { players: [players[0], players[1]], currentBid: { quantity: 2, face: 4 }, previousBidderId: 'b', turnIndex: 0, calzaEnabled: true })
+      aiCalzaLegalOnly: !shouldCallCalza(players[0], Object.assign({}, state, { palaficoActive: true })) && !shouldCallCalza(players[0], { players: [players[0], players[1]], currentBid: { quantity: 2, face: 4 }, previousBidderId: 'b', turnIndex: 0, calzaEnabled: true }),
+      openingBidsReasonableForTwentyFiveDice: reasonableOpenings,
+      aiDoesNotOpenNinePlusWithoutRareBluff: noNineOpen,
+      averageOpeningBidNearExpected: openingAverage >= 3 && openingAverage <= 5.75,
+      bidJumpsUsuallyGradual: gradualRaises,
+      aggressiveCockyCanMakeBiggerJumps: aggressiveBigJumpScore,
+      aiDoesNotInstantDudoSafeOpeningOften: safeOpeningDudoChance < .12,
+      palaficoOpeningStillLegal: !palAction || window.isLegalBid(palAction, null, Object.assign({}, pal, { currentBid: null, lockedFace: null }), players[0])
     };
   }
 
-  window.PerudoAI = { generateAIPlayer: generateAIPlayer, generateAIName: generateAIName, getAvatarPersonality: getAvatarPersonality, chooseAICupColour: chooseAICupColour, applyLeaderboardPersonalityModifiers: applyLeaderboardPersonalityModifiers, getAiSkillLevel: getAiSkillLevel, setAiSkillLevel: setAiSkillLevel, loadAiMemory: loadAiMemory, saveAiMemory: saveAiMemory, createPlayerMemory: createPlayerMemory, getPlayerMemory: getPlayerMemory, recordBidMemory: recordBidMemory, updateMemoryAfterDudo: updateMemoryAfterDudo, updateMemoryAfterCalza: updateMemoryAfterCalza, getRankNumber: getRankNumber, getRankTier: getRankTier, getRankGap: getRankGap, isHighRank: isHighRank, isLowRank: isLowRank, isCloseRank: isCloseRank, getOpponentThreatLevel: getOpponentThreatLevel, getTotalDiceInPlay: getTotalDiceInPlay, getKnownDiceForPlayer: getKnownDiceForPlayer, getFaceCountInOwnDice: getFaceCountInOwnDice, getExpectedFaceCount: getExpectedFaceCount, getBidRiskLevel: getBidRiskLevel, getBidConfidenceScore: getBidConfidenceScore, getLegalBidOptions: getLegalBidOptions, getDiceConfidenceBand: getDiceConfidenceBand, getDiceRiskModifier: getDiceRiskModifier, getRiskAppetite: getRiskAppetite, getDudoCallChance: getDudoCallChance, scoreBidOption: scoreBidOption, chooseBestBid: chooseBestBid, shouldCallDudo: shouldCallDudo, shouldCallCalza: shouldCallCalza, chooseAiAction: chooseAiAction, chooseAIMove: chooseAIMove, applyAIMoodEvent: applyAIMoodEvent, validateAiIntelligence: validateAiIntelligence };
+  window.PerudoAI = { generateAIPlayer: generateAIPlayer, generateAIName: generateAIName, getAvatarPersonality: getAvatarPersonality, chooseAICupColour: chooseAICupColour, applyLeaderboardPersonalityModifiers: applyLeaderboardPersonalityModifiers, getAiSkillLevel: getAiSkillLevel, setAiSkillLevel: setAiSkillLevel, getBidTempo: getBidTempo, setBidTempo: setBidTempo, getMaxReasonableOpeningBid: getMaxReasonableOpeningBid, getBidJumpSize: getBidJumpSize, loadAiMemory: loadAiMemory, saveAiMemory: saveAiMemory, createPlayerMemory: createPlayerMemory, getPlayerMemory: getPlayerMemory, recordBidMemory: recordBidMemory, updateMemoryAfterDudo: updateMemoryAfterDudo, updateMemoryAfterCalza: updateMemoryAfterCalza, getRankNumber: getRankNumber, getRankTier: getRankTier, getRankGap: getRankGap, isHighRank: isHighRank, isLowRank: isLowRank, isCloseRank: isCloseRank, getOpponentThreatLevel: getOpponentThreatLevel, getTotalDiceInPlay: getTotalDiceInPlay, getKnownDiceForPlayer: getKnownDiceForPlayer, getFaceCountInOwnDice: getFaceCountInOwnDice, getExpectedFaceCount: getExpectedFaceCount, getBidRiskLevel: getBidRiskLevel, getBidConfidenceScore: getBidConfidenceScore, getLegalBidOptions: getLegalBidOptions, getDiceConfidenceBand: getDiceConfidenceBand, getDiceRiskModifier: getDiceRiskModifier, getRiskAppetite: getRiskAppetite, getDudoCallChance: getDudoCallChance, scoreBidOption: scoreBidOption, chooseBestBid: chooseBestBid, shouldCallDudo: shouldCallDudo, shouldCallCalza: shouldCallCalza, chooseAiAction: chooseAiAction, chooseAIMove: chooseAIMove, applyAIMoodEvent: applyAIMoodEvent, validateAiIntelligence: validateAiIntelligence };
   Object.assign(window, window.PerudoAI);
 })();

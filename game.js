@@ -19,6 +19,9 @@
     palaficoRoundBanner: 3000,
     roundStartPause: 1400,
     nextTurnPause: 900,
+    dudoShoutPause: 400,
+    diceLossLaughMinGap: 800,
+    diceLossLaughMaxGap: 1200,
     slowTurnFirstTaunt: 8000,
     slowTurnSecondTaunt: 14000,
     slowTurnThirdTaunt: 22000,
@@ -43,11 +46,14 @@
     aceBidsThisRound: [],
     calzaEnabled: false,
     aiSkillLevel: 'hard',
+    bidTempo: 'steady',
+    bidCountThisRound: 0,
     aiMemory: {},
     dudoStats: {},
     revealMode: false,
     gameOver: false,
     turnBusy: false,
+    isAnimatingDiceLoss: false,
     calzaWindowOpen: false,
     openingBanterDone: false,
     lastNewPlayerMoment: {},
@@ -61,6 +67,8 @@
     actionMessage: 'Waiting for the round to begin...'
   };
 
+  var DUDO_SHOUTS = ['DUDO!', 'Dudo!', 'Calling it!', 'That is nonsense!', 'No chance!', 'Caught you!'];
+
   function $(id) { return document.getElementById(id); }
   function activePlayers() { return window.PerudoRules.getActivePlayers(state.players); }
   function playerById(id) { return state.players.find(function (p) { return p.id === id; }); }
@@ -68,6 +76,7 @@
   function totalDiceInPlay() { return activePlayers().reduce(function (sum, p) { return sum + p.diceCount; }, 0); }
   function faceName(face) { return face === 1 ? 'aces' : ['', 'one', 'twos', 'threes', 'fours', 'fives', 'sixes'][face]; }
   function bidText(bid) { return bid ? bid.quantity + ' x ' + faceName(bid.face) : 'No bid yet'; }
+  function getDudoShoutPhrase() { return DUDO_SHOUTS[Math.floor(Math.random() * DUDO_SHOUTS.length)] || 'DUDO!'; }
   function selectedBidFace() {
     var faceEl = $('bidFace');
     return faceEl ? Number(faceEl.value) || 2 : 2;
@@ -99,6 +108,8 @@
       aceBidsThisRound: state.aceBidsThisRound,
       calzaEnabled: state.calzaEnabled,
       aiSkillLevel: state.aiSkillLevel,
+      bidTempo: state.bidTempo,
+      bidCountThisRound: state.bidCountThisRound,
       aiMemory: state.aiMemory,
       tableTension: state.tableTension
     };
@@ -201,6 +212,36 @@
     }
     await wait(PACE.tableReactionMinGap);
     return true;
+  }
+
+  async function runDiceLossLaughs(loser, loss) {
+    if (!window.getDiceLossLaughReactions || !window.showSpeechBubble || !loser) return false;
+    var reactions = window.getDiceLossLaughReactions(state.players, loser, {
+      players: state.players,
+      loser: loser,
+      target: loser,
+      loss: loss,
+      phase: 'diceLoss',
+      roundState: makeRoundState()
+    });
+    if (!reactions.length) return false;
+    for (var i = 0; i < reactions.length; i += 1) {
+      window.showSpeechBubble(reactions[i].speaker.id, reactions[i].line);
+      await wait(randomBetween(PACE.diceLossLaughMinGap, PACE.diceLossLaughMaxGap));
+    }
+    return true;
+  }
+
+  function markDieRemoving(player) {
+    if (!player) return null;
+    var diceLength = Array.isArray(player.dice) ? player.dice.length : 0;
+    var index = Math.max(0, (diceLength || Number(player.diceCount) || 1) - 1);
+    player.diceRemovingIndex = index;
+    return index;
+  }
+
+  function clearDieRemoving(player) {
+    if (player && Object.prototype.hasOwnProperty.call(player, 'diceRemovingIndex')) delete player.diceRemovingIndex;
   }
 
   async function runOpeningBanterIfNeeded() {
@@ -483,10 +524,16 @@
   function makeTalkContext(actor, bid, extra) {
     var diceInPlay = totalDiceInPlay();
     var previousBid = extra && extra.previousBid;
-    var aiRisk = window.getBidRiskLevel ? window.getBidRiskLevel(bid || state.currentBid, actor || currentPlayer(), makeRoundState()) : 'reasonable';
+    var roundState = makeRoundState();
+    var aiRisk = window.getBidRiskLevel ? window.getBidRiskLevel(bid || state.currentBid, actor || currentPlayer(), roundState) : 'reasonable';
     var risk = { safe: 'low', reasonable: 'medium', risky: 'high', dangerous: 'high', absurd: 'absurd' }[aiRisk] || 'medium';
     return Object.assign({
       playerName: actor && actor.name,
+      players: state.players,
+      roundState: roundState,
+      phase: 'reaction',
+      dudoCalled: false,
+      calzaCalled: false,
       bidder: actor,
       target: actor,
       caller: actor,
@@ -559,6 +606,7 @@
     state.palaficoPlayerId = null;
     state.aceBidsThisRound = [];
     state.aiSkillLevel = window.getAiSkillLevel ? window.getAiSkillLevel() : state.aiSkillLevel;
+    state.bidTempo = window.getBidTempo ? window.getBidTempo() : state.bidTempo;
     state.aiMemory = window.loadAiMemory ? window.loadAiMemory() : state.aiMemory;
     state.roundNumber = 0;
     state.gameOver = false;
@@ -585,6 +633,7 @@
     state.roundNumber += 1;
     state.currentBid = null;
     state.previousBidderId = null;
+    state.bidCountThisRound = 0;
     state.revealMode = false;
     state.lockedFace = null;
     state.aceBidsThisRound = [];
@@ -690,8 +739,13 @@
       cupColour: player.cupColour || player.cupColor || '#777777',
       diceCount: Number.isFinite(player.diceCount) ? player.diceCount : 0,
       dice: Array.isArray(player.dice) ? player.dice : [],
+      diceRemovingIndex: Number.isFinite(player.diceRemovingIndex) ? player.diceRemovingIndex : null,
       mood: player.moodLevel || player.mood || (player.personality && player.personality.type) || 'calm'
     };
+  }
+
+  function shouldPreserveDiceLossRender(tableEl) {
+    return !!(state.isAnimatingDiceLoss && tableEl && tableEl.querySelector('.die.removing-die'));
   }
 
   function renderPlayers() {
@@ -705,13 +759,17 @@
       console.error('[RENDER] table container missing');
       return;
     }
+    if (shouldPreserveDiceLossRender(tableEl)) {
+      console.log('[RENDER] dice loss animation lock: preserving current dice DOM');
+      return;
+    }
     try {
-      var activeCount = window.PerudoRules.getActivePlayers(state.players).length;
-      var activeSeatIndex = 0;
+      var positionedCount = state.players.filter(function (p) { return p && !p.empty; }).length;
+      var positionedSeatIndex = 0;
       var html = state.players.map(function (player, index) {
         try {
-          var seatHtml = renderSeat(player, index, activeSeatIndex, activeCount);
-          if (player && !player.empty && !player.eliminated) activeSeatIndex += 1;
+          var seatHtml = renderSeat(player, index, positionedSeatIndex, positionedCount);
+          if (player && !player.empty) positionedSeatIndex += 1;
           return seatHtml;
         } catch (seatError) {
           console.error('[RENDER] failed player:', player, seatError);
@@ -739,16 +797,20 @@
     var fg = window.PerudoCups && window.PerudoCups.getContrastColour ? window.PerudoCups.getContrastColour(p.cupColour) : '#fff8e7';
     var dice = p.dice.map(function (value, index) {
       var visible = p.human || state.revealMode || p.eliminated;
-      return '<span class="die ' + (visible ? '' : 'hidden-die') + '" data-die-index="' + index + '" style="--die-bg:' + safeText(p.cupColour) + ';--die-fg:' + safeText(fg) + '">' + (visible ? safeText(value) : '?') + '</span>';
+      var removing = p.diceRemovingIndex === index ? ' removing-die lose' : '';
+      return '<span class="die ' + (visible ? '' : 'hidden-die') + removing + '" data-die-index="' + index + '" style="--die-bg:' + safeText(p.cupColour) + ';--die-fg:' + safeText(fg) + '">' + (visible ? safeText(value) : '?') + '</span>';
     }).join('');
-    if (!dice && !p.eliminated) dice = Array.from({ length: p.diceCount }, function (_, index) { return '<span class="die hidden-die" data-die-index="' + index + '" style="--die-bg:' + safeText(p.cupColour) + ';--die-fg:' + safeText(fg) + '">?</span>'; }).join('');
+    if (!dice && !p.eliminated) dice = Array.from({ length: p.diceCount }, function (_, index) {
+      var removing = p.diceRemovingIndex === index ? ' removing-die lose' : '';
+      return '<span class="die hidden-die' + removing + '" data-die-index="' + index + '" style="--die-bg:' + safeText(p.cupColour) + ';--die-fg:' + safeText(fg) + '">?</span>';
+    }).join('');
     var rank = safeRankBadge(p);
     var active = currentPlayer() && currentPlayer().id === p.id ? ' active-turn' : '';
     var human = currentPlayer() && currentPlayer().id === p.id && p.human ? ' human-turn' : '';
     var palaficoHighlight = state.palaficoPlayerId === p.id && state.palificoActive ? ' palafico-highlight' : '';
     var eliminated = p.eliminated ? ' eliminated' : '';
     var mobileClass = ' player-count-' + safeText(activeCount || 0) + ' seat-pos-' + safeText(activeSeatIndex || 0);
-    return '<article class="seat' + active + human + palaficoHighlight + eliminated + mobileClass + '" data-player-id="' + safeText(p.id) + '" style="--turn-color:' + safeText(p.cupColour) + '"><div class="avatar-line"><span class="avatar">' + safeText(p.avatar) + '</span><div><div class="player-name">' + safeText(p.name) + '</div><span class="rank-badge">' + safeText(rank) + '</span></div></div><div class="cup" style="--cup:' + safeText(p.cupColour) + '"></div><p class="meta">Mood: ' + safeText(p.mood) + ' · Dice: ' + safeText(p.diceCount) + '</p><div class="dice-row">' + dice + '</div></article>';
+    return '<article class="seat player-card' + active + human + palaficoHighlight + eliminated + mobileClass + '" data-player-id="' + safeText(p.id) + '" style="--turn-color:' + safeText(p.cupColour) + '"><div class="avatar-line"><span class="avatar">' + safeText(p.avatar) + '</span><div><div class="player-name">' + safeText(p.name) + '</div><span class="rank-badge">' + safeText(rank) + '</span></div></div><div class="cup" style="--cup:' + safeText(p.cupColour) + '"></div><p class="meta">Mood: ' + safeText(p.mood) + ' · Dice: ' + safeText(p.diceCount) + '</p><div class="dice-row">' + dice + '</div></article>';
   }
 
   function legalBidsForFace(face, player, roundState) {
@@ -1004,6 +1066,7 @@
     }
     var previousBidForTalk = state.currentBid ? { quantity: state.currentBid.quantity, face: state.currentBid.face } : null;
     state.currentBid = { quantity: Number(bid.quantity), face: Number(bid.face) };
+    state.bidCountThisRound += 1;
     window.recordAceBid(state, state.currentBid);
     state.previousBidderId = playerId;
     if (window.recordBidMemory) window.recordBidMemory(p, state.currentBid, makeRoundState(), state.aiMemory);
@@ -1014,7 +1077,7 @@
       window.showSpeechBubble(p.id, window.getBanterLine(p, 'bid', activePlayers().find(function (x) { return x.id !== p.id; }), speechBidContext(state.currentBid)));
     }
     renderGame();
-    var talkContext = makeTalkContext(p, state.currentBid, { previousBid: previousBidForTalk, nextPlayer: peekNextPlayer() });
+    var talkContext = makeTalkContext(p, state.currentBid, { previousBid: previousBidForTalk, nextPlayer: peekNextPlayer(), phase: 'awaitingDecision', dudoCalled: false, calzaCalled: false });
     await runTableTalk(p.human ? 'afterHumanBid' : 'afterBid', talkContext);
     if (p.human && (talkContext.risk === 'high' || talkContext.risk === 'absurd')) await runNewPlayerMoment('newPlayerGoodMove', p, talkContext);
     await wait(PACE.bidResultPause);
@@ -1050,9 +1113,10 @@
     emphasizeLiarCalled(true);
     log('LIAR CALLED: ' + challenger.name + ' challenges ' + bidder.name + "'s bid: " + bidText(state.currentBid) + '.');
     window.playDudoSound();
-    window.maybeSpeak(challenger, 'dudo', bidder, true, speechBidContext(state.currentBid));
+    if (window.showSpeechBubble) window.showSpeechBubble(challenger.id, getDudoShoutPhrase(), 'dudo', { allowHuman: true });
     renderGame();
-    await runTableTalk(challenger.human ? 'afterHumanDudo' : 'afterDudoCalled', makeTalkContext(challenger, state.currentBid, { caller: challenger, target: bidder, lastBidder: bidder.name, risk: 'high' }));
+    await wait(PACE.dudoShoutPause);
+    await runTableTalk(challenger.human ? 'afterHumanDudo' : 'afterDudoCalled', makeTalkContext(challenger, state.currentBid, { caller: challenger, target: bidder, lastBidder: bidder.name, risk: 'high', phase: 'dudoCalled', dudoCalled: true, nextPlayer: null }));
     await wait(PACE.challengeResultPause);
     setAction('Revealing dice...');
     state.revealMode = true;
@@ -1083,7 +1147,7 @@
     var loser = playerById(result.loserId);
     setAction((bidSurvived ? 'Bid was true' : 'Bid was false') + ' - ' + (bidSurvived ? 'challenger' : 'bidder') + ' loses 1 die. ' + loser.name + ' loses it.');
     log(loser.name + ' loses 1 die.');
-    await runTableTalk(result.callerCorrect ? 'afterDudoSuccess' : 'afterDudoFail', makeTalkContext(challenger, state.currentBid, { caller: challenger, target: loser, lastBidder: bidder.name, risk: 'high' }));
+    await runTableTalk(result.callerCorrect ? 'afterDudoSuccess' : 'afterDudoFail', makeTalkContext(challenger, state.currentBid, { caller: challenger, target: loser, lastBidder: bidder.name, risk: 'high', phase: 'dudoResolved', dudoCalled: true, nextPlayer: null }));
     if (challenger.human && result.callerCorrect) await runNewPlayerMoment('newPlayerGoodMove', challenger, { target: bidder, caller: challenger, risk: 'high' });
     if (bidder.human && !result.callerCorrect) await runNewPlayerMoment('newPlayerGoodMove', bidder, { target: challenger, caller: challenger, risk: 'high' });
     await wait(PACE.challengeResultDisplay);
@@ -1120,7 +1184,7 @@
     await runCalzaShout(caller);
     window.maybeSpeak(caller, 'challenge', playerById(state.previousBidderId), true, speechBidContext(state.currentBid));
     renderGame();
-    await runTableTalk(caller.human ? 'afterHumanCalza' : 'afterCalzaCalled', makeTalkContext(caller, state.currentBid, { caller: caller, target: playerById(state.previousBidderId), risk: 'high' }));
+    await runTableTalk(caller.human ? 'afterHumanCalza' : 'afterCalzaCalled', makeTalkContext(caller, state.currentBid, { caller: caller, target: playerById(state.previousBidderId), risk: 'high', phase: 'calzaCalled', calzaCalled: true, nextPlayer: null }));
     await wait(PACE.challengeResultPause);
     setAction('Revealing dice for Calza...');
     state.revealMode = true;
@@ -1143,14 +1207,14 @@
       setAction('Calza exact - ' + caller.name + (gain.gainedDie ? ' gains 1 die.' : ' is already at 5 dice.'));
       log(caller.name + ' called Calza exactly and ' + (gain.gainedDie ? 'gains 1 die.' : 'stays at 5 dice.'));
       renderGame();
-      await runTableTalk('afterCalzaSuccess', makeTalkContext(caller, state.currentBid, { caller: caller, target: caller, risk: 'high' }));
+      await runTableTalk('afterCalzaSuccess', makeTalkContext(caller, state.currentBid, { caller: caller, target: caller, risk: 'high', phase: 'calzaResolved', calzaCalled: true, nextPlayer: null }));
       if (caller.human) await runNewPlayerMoment('newPlayerGoodMove', caller, { caller: caller, target: caller, risk: 'high' });
       await wait(PACE.challengeResultDisplay);
     } else {
       if (window.applyAIMoodEvent) window.applyAIMoodEvent(caller, 'failedCalza');
       setAction('Calza wrong - ' + caller.name + ' loses 1 die. Previous bidder is safe.');
       log(caller.name + ' called Calza wrong and loses 1 die. Previous bidder is safe.');
-      await runTableTalk('afterCalzaFail', makeTalkContext(caller, state.currentBid, { caller: caller, target: caller, risk: 'high' }));
+      await runTableTalk('afterCalzaFail', makeTalkContext(caller, state.currentBid, { caller: caller, target: caller, risk: 'high', phase: 'calzaResolved', calzaCalled: true, nextPlayer: null }));
       if (caller.human) await runNewPlayerMoment('newPlayerBadMove', caller, { caller: caller, target: caller, risk: 'high' });
       await wait(PACE.challengeResultDisplay);
       await loseDie(caller);
@@ -1167,9 +1231,20 @@
   async function loseDie(player) {
     window.recordPlayerEvent(player, 'lostDie');
     window.playLoseDieSound();
-    await window.animateDieLoss(player.id);
+    console.log('dice loss animation start', player && player.name);
+    state.isAnimatingDiceLoss = true;
+    var removingIndex = markDieRemoving(player);
+    console.log('die marked removing', { player: player && player.name, dieIndex: removingIndex });
+    renderGame();
+    await window.animateDieLoss(player.id, removingIndex);
     var loss = window.applyDiceLoss(player, makeRoundState());
+    clearDieRemoving(player);
+    state.isAnimatingDiceLoss = false;
+    console.log('die removed from state', { player: player && player.name, diceCount: player && player.diceCount, dice: player && player.dice && player.dice.length });
+    renderGame();
+    console.log('render after removal', { player: player && player.name, diceCount: player && player.diceCount });
     if (window.applyAIMoodEvent) window.applyAIMoodEvent(player, 'lostDie');
+    await runDiceLossLaughs(player, loss);
     if (loss.startsPalafico && shouldTriggerPalaficoAnnouncement(player, makeRoundState())) {
       await runPalaficoAnticipationSequence(player);
       state.pendingPalificoPlayerId = player.id;
@@ -1183,12 +1258,12 @@
       await window.animateElimination(player.id);
       log(player.name + ' has been eliminated and moves to Spectators.');
       renderGame();
-      await runTableTalk('afterElimination', makeTalkContext(player, state.currentBid, { target: player, risk: 'high' }));
+      await runTableTalk('afterElimination', makeTalkContext(player, state.currentBid, { target: player, risk: 'high', phase: 'roundTransition', nextPlayer: null }));
       if (player.human) await runNewPlayerMoment('newPlayerEliminated', player, { target: player, risk: 'high' });
     } else {
       window.maybeSpeak(player, 'loss', null);
       renderGame();
-      await runTableTalk(loss.startsPalafico ? 'afterPalaficoStart' : 'afterDiceLoss', makeTalkContext(player, state.currentBid, { target: player, risk: loss.startsPalafico ? 'high' : 'medium' }));
+      await runTableTalk(loss.startsPalafico ? 'afterPalaficoStart' : 'afterDiceLoss', makeTalkContext(player, state.currentBid, { target: player, risk: loss.startsPalafico ? 'high' : 'medium', phase: 'roundTransition', nextPlayer: null }));
       if (player.human) await runNewPlayerMoment('newPlayerBadMove', player, { target: player, risk: loss.startsPalafico ? 'high' : 'medium' });
     }
     renderGame();
@@ -1229,6 +1304,7 @@
     window.renderProfile();
     var soundSettings = window.initSound ? window.initSound() : { enabled: true, volume: .45 };
     state.aiSkillLevel = window.getAiSkillLevel ? window.getAiSkillLevel() : 'hard';
+    state.bidTempo = window.getBidTempo ? window.getBidTempo() : 'steady';
     state.aiMemory = window.loadAiMemory ? window.loadAiMemory() : {};
     var savedCalza = localStorage.getItem('calzaEnabled');
     state.calzaEnabled = savedCalza === null ? true : savedCalza === 'true';
@@ -1239,6 +1315,7 @@
     $('soundToggle').checked = soundSettings.enabled;
     $('volumeSlider').value = soundSettings.volume;
     if ($('aiSkillLevel')) $('aiSkillLevel').value = state.aiSkillLevel;
+    if ($('bidTempo')) $('bidTempo').value = state.bidTempo;
     if ($('calzaToggle')) $('calzaToggle').checked = state.calzaEnabled;
     $('banterLevel').value = String(window.getBanterLevel ? window.getBanterLevel() : 2);
     $('skipAnimationsToggle').checked = localStorage.getItem('perudoSkipAnimations') === 'true';
@@ -1262,6 +1339,7 @@
     });
     $('banterLevel').addEventListener('change', function () { if (window.setBanterLevel) window.setBanterLevel($('banterLevel').value); else localStorage.setItem('perudoBanterLevel', $('banterLevel').value); });
     if ($('aiSkillLevel')) $('aiSkillLevel').addEventListener('change', function () { state.aiSkillLevel = $('aiSkillLevel').value; if (window.setAiSkillLevel) window.setAiSkillLevel(state.aiSkillLevel); });
+    if ($('bidTempo')) $('bidTempo').addEventListener('change', function () { state.bidTempo = $('bidTempo').value; if (window.setBidTempo) window.setBidTempo(state.bidTempo); });
     $('soundToggle').addEventListener('change', function () { window.PerudoSound.setSoundSettings({ enabled: $('soundToggle').checked }); });
     $('volumeSlider').addEventListener('input', function () { window.PerudoSound.setSoundSettings({ volume: Number($('volumeSlider').value) }); });
     $('skipAnimationsToggle').addEventListener('change', function () { localStorage.setItem('perudoSkipAnimations', $('skipAnimationsToggle').checked); });
@@ -1569,6 +1647,31 @@
     }
   }
 
+  function runDiceLossAnimationConsoleTests() {
+    var savedAnimating = state.isAnimatingDiceLoss;
+    try {
+      var player = { id: 'loss-test', name: 'Loss Test', diceCount: 3, dice: [2, 4, 6], eliminated: false };
+      state.isAnimatingDiceLoss = true;
+      var removingIndex = markDieRemoving(player);
+      var oldStateKeptDuringFade = removingIndex === 2 && player.diceCount === 3 && player.dice.length === 3;
+      var fakeTable = document.createElement('div');
+      fakeTable.innerHTML = '<span class="die removing-die lose"></span>';
+      var renderLocked = shouldPreserveDiceLossRender(fakeTable);
+      var beforeCount = player.diceCount;
+      var beforeDiceLength = player.dice.length;
+      var loss = window.applyDiceLoss(player, { players: [player, { id: 'b', diceCount: 2 }, { id: 'c', diceCount: 2 }] });
+      clearDieRemoving(player);
+      state.isAnimatingDiceLoss = false;
+      return {
+        lostDieDoesNotReappearAfterFade: oldStateKeptDuringFade && player.dice.length === beforeDiceLength - 1 && player.diceRemovingIndex == null,
+        playerDiceCountReducesExactlyOnce: loss.lostDie && beforeCount - player.diceCount === 1,
+        noDuplicateRenderCreatesOldDieDuringAnimation: renderLocked
+      };
+    } finally {
+      state.isAnimatingDiceLoss = savedAnimating;
+    }
+  }
+
   function runConsoleTests() {
     var ruleFailures = window.runOfficialRulesTests ? window.runOfficialRulesTests() : ['Official rules test runner missing'];
     if (ruleFailures.length) {
@@ -1608,6 +1711,21 @@
     console.assert(banterChecks.introDoesNotBreakTurnOrder, 'Intro does not break turn order');
     console.assert(banterChecks.noRepeatedNicknameSpam, 'No repeated nickname spam');
     console.assert(banterChecks.slowTurnTauntExists, 'Slow-turn taunt phrase pool is available');
+    console.assert(banterChecks.aiDoesNotTargetItself, 'AI does not target itself in normal banter');
+    console.assert(banterChecks.aiDoesNotSayOwnNameExceptIntro, 'AI does not say its own name except during introduction');
+    console.assert(banterChecks.pressureOnlyBeforeDudoCalza, 'Pressure-next-player phrases only appear before Dudo/Calza');
+    console.assert(banterChecks.noCallDudoAfterDudo, 'No call Dudo phrase appears after Dudo is already called');
+    console.assert(banterChecks.noCallDudoDuringReveal, 'No call Dudo phrase appears during dice reveal');
+    console.assert(banterChecks.noStaleNextPlayerAfterDudo, 'No stale nextPlayer is used after Dudo');
+    console.assert(banterChecks.eliminatedPlayersNotSpeechTargets, 'Eliminated players are not selected as speech targets');
+    console.assert(banterChecks.fallbackPhraseWorksIfTargetsInvalid, 'Fallback phrase works if all targets are invalid');
+    console.assert(banterChecks.introductionsMayIncludeOwnName, 'Introductions may include speaker own name');
+    console.assert(banterChecks.diceLossLaughCanTrigger, 'Dice-loss laugh can trigger after die loss');
+    console.assert(banterChecks.diceLossLoserNeverMocksSelf, 'Dice-loss loser never mocks themselves');
+    console.assert(banterChecks.diceLossSpeakerNeverSaysOwnName, 'Dice-loss speaker never says own name');
+    console.assert(banterChecks.newPlayerLossUsesNewPhrases, 'New player loss uses new-player phrases sometimes');
+    console.assert(banterChecks.rankOneLossUsesRankPhrases, 'Rank #1 loss uses rank-specific phrases sometimes');
+    console.assert(banterChecks.diceLossLaughsMaxTwo, 'No more than 2 dice-loss laugh reactions');
     console.assert(typeof runCalzaShout === 'function', 'Calza shout fires when Calza is called');
     var palTestPlayers = [{ id: 'p', name: 'Pal', diceCount: 1, dice: [3], palaficoUsed: false }, { id: 'a', diceCount: 3 }, { id: 'b', diceCount: 3 }];
     console.assert(shouldTriggerPalaficoAnnouncement(palTestPlayers[0], { players: palTestPlayers }), 'Palafico shout fires when player drops from 2 dice to 1');
@@ -1639,6 +1757,13 @@
     console.assert(aiChecks.noIllegalPalaficoFaceChange, 'AI never changes face illegally in Palafico');
     console.assert(aiChecks.respectsAcesRules, 'AI respects aces rules');
     console.assert(aiChecks.aiCalzaLegalOnly, 'AI only calls Calza when legal');
+    console.assert(aiChecks.openingBidsReasonableForTwentyFiveDice, 'Opening bids are usually within reasonable range for 25 dice');
+    console.assert(aiChecks.aiDoesNotOpenNinePlusWithoutRareBluff, 'AI does not open 9+ with 25 dice unless rare bluff or strong evidence');
+    console.assert(aiChecks.averageOpeningBidNearExpected, 'Average opening bid stays around expected values');
+    console.assert(aiChecks.bidJumpsUsuallyGradual, 'Bid jumps are usually +1 or same quantity higher face');
+    console.assert(aiChecks.aggressiveCockyCanMakeBiggerJumps, 'Aggressive/cocky players can still occasionally make bigger jumps');
+    console.assert(aiChecks.aiDoesNotInstantDudoSafeOpeningOften, 'AI does not instantly Dudo safe opening bids too often');
+    console.assert(aiChecks.palaficoOpeningStillLegal, 'Palafico opening logic still follows official rules');
     if (Object.values(banterChecks).every(Boolean) && Object.values(aiChecks).every(Boolean)) console.log('AI intelligence, mood, and banter validation passed');
     console.assert(!window.getBanterLine({ name: 'Test', id: 'test' }, 'bidding', null, { quantity: 6, face: 'threes', currentBid: '6 x threes' }).includes('['), 'Dynamic banter templates resolve variables');
     var countTargets = window.getChallengeCountTargets({ quantity: 1, face: 4 }, mock, false);
@@ -1676,6 +1801,10 @@
     console.assert(slowAiChecks.selectedSlowAiClearedAfterUse, 'Selected slow AI is cleared after use');
     console.assert(slowAiChecks.slowAiMoodCanChange, 'Slow AI delay can affect mood');
     console.assert(slowAiChecks.eliminatedSelectedAiIsCancelled, 'Eliminated selected slow AI is cancelled');
+    var diceLossAnimationChecks = runDiceLossAnimationConsoleTests();
+    console.assert(diceLossAnimationChecks.lostDieDoesNotReappearAfterFade, 'Lost die does not reappear after fade');
+    console.assert(diceLossAnimationChecks.playerDiceCountReducesExactlyOnce, 'Player dice count reduces exactly once');
+    console.assert(diceLossAnimationChecks.noDuplicateRenderCreatesOldDieDuringAnimation, 'No duplicate render creates old die during animation');
     var entry = { cupColourUsage: {} }; window.updateCupColourStats(entry, '#ffffff', true); window.updateCupColourStats(entry, '#ffffff', false);
     console.assert(window.getCupColourWinRate(entry.cupColourUsage['#ffffff']) === 50, 'Cup colour stat tracking');
     var originalBoard = localStorage.getItem('perudoGlobalLeaderboard');

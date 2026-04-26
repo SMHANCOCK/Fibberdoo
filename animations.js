@@ -9,7 +9,27 @@
   }
   function animateDiceRoll(playerId) { return animateSelector(playerId ? '[data-player-id="' + playerId + '"] .die' : '.seat:not(.eliminated) .die', 'roll', 800); }
   function animateDiceReveal(playerId) { return animateSelector('[data-player-id="' + playerId + '"] .die', 'reveal', 720); }
-  function animateDieLoss(playerId) { return animateSelector('[data-player-id="' + playerId + '"] .die:last-child', 'lose', 650); }
+  function animateDieLoss(playerId, dieIndex) {
+    if (skip()) return Promise.resolve();
+    var seat = document.querySelector('[data-player-id="' + playerId + '"]');
+    if (!seat) return Promise.resolve();
+    var selector = dieIndex == null ? '.die.removing-die, .die:last-child' : '.die[data-die-index="' + dieIndex + '"]';
+    var die = seat.querySelector(selector) || seat.querySelector('.die:last-child');
+    if (!die) return Promise.resolve();
+    die.classList.add('removing-die', 'lose');
+    return new Promise(function (resolve) {
+      var done = false;
+      function finish() {
+        if (done) return;
+        done = true;
+        die.removeEventListener('animationend', finish);
+        if (die.parentNode) die.remove();
+        resolve();
+      }
+      die.addEventListener('animationend', finish, { once: true });
+      setTimeout(finish, 720);
+    });
+  }
   function animateElimination(playerId) { return animateSelector('[data-player-id="' + playerId + '"]', 'vanish', 700); }
   function animateWinnerDice(playerId) { var seat = document.querySelector('[data-player-id="' + playerId + '"]'); if (seat) seat.classList.add('winner-pulse'); }
   function animateRankChange(change) { return window.PerudoLeaderboard ? window.PerudoLeaderboard.animateRankChange(change) : ''; }
