@@ -2,6 +2,7 @@
   var SKILL_KEY = 'perudoAiSkillLevel';
   var MEMORY_KEY = 'perudoAiMemory';
   var TEMPO_KEY = 'perudoBidTempo';
+  var CUSTOM_AI_AVATARS_KEY = 'perudoAllowCustomAiAvatars';
   var SKILL_LEVELS = ['easy', 'normal', 'hard', 'expert'];
   var BID_TEMPOS = ['cautious', 'steady', 'aggressive'];
 
@@ -21,7 +22,13 @@
     '🐸': ['Froggy Phil', 'Pond Pete', 'Ribbit Rita']
   };
   var avatars = Object.keys(namePools);
-  var defaultColours = { '😈': '#a31522', '🐺': '#777f86', '🦊': '#e46f25', '🤖': '#8fa3ad', '🦥': '#817044', '🦈': '#55798d', '🦄': '#ff82c8', '🐻': '#8b5e34', '🦝': '#596066', '🦆': '#d7a927', '🐱': '#c47c43', '🦉': '#7a5c2e', '🐸': '#55a85a' };
+  var customNamePools = {
+    'custom-ant-bunny': ['Ant Bunny', 'Bunny Ant', 'Antony Bunny'],
+    'custom-matt-hammock': ['Matt Hammock', 'Hammock Matt', 'Matty Hammock'],
+    'custom-pete-socks': ['Pete Socks', 'Socksy Pete', 'Peter Socks'],
+    'custom-steve-hammock': ['Steve Hammock', 'Hammock Steve', 'Steve Snooze']
+  };
+  var defaultColours = { '😈': '#a31522', '🐺': '#777f86', '🦊': '#e46f25', '🤖': '#8fa3ad', '🦥': '#817044', '🦈': '#55798d', '🦄': '#ff82c8', '🐻': '#8b5e34', '🦝': '#596066', '🦆': '#d7a927', '🐱': '#c47c43', '🦉': '#7a5c2e', '🐸': '#55a85a', 'custom-ant-bunny': '#ec4899', 'custom-matt-hammock': '#0d9488', 'custom-pete-socks': '#f97316', 'custom-steve-hammock': '#2563eb' };
   var animalTypes = { '😈': 'devil', '🐺': 'wolf', '🦊': 'fox', '🤖': 'robot', '🦥': 'sloth', '🦈': 'shark', '🦄': 'unicorn', '🐻': 'bear', '🦝': 'raccoon', '🦆': 'duck', '🐱': 'cat', '🦉': 'owl', '🐸': 'frog' };
 
   function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
@@ -39,6 +46,12 @@
   }
   function setBidTempo(tempo) {
     localStorage.setItem(TEMPO_KEY, BID_TEMPOS.indexOf(tempo) === -1 ? 'steady' : tempo);
+  }
+  function getAllowCustomAiAvatars() {
+    return localStorage.getItem(CUSTOM_AI_AVATARS_KEY) !== 'false';
+  }
+  function setAllowCustomAiAvatars(enabled) {
+    localStorage.setItem(CUSTOM_AI_AVATARS_KEY, enabled ? 'true' : 'false');
   }
   function tempoProfile(roundState) {
     var tempo = (roundState && roundState.bidTempo) || getBidTempo();
@@ -117,12 +130,42 @@
     saveAiMemory(memoryStore);
   }
 
+  function resolveAvatarEntry(avatar) {
+    return window.getAvatarEntry ? window.getAvatarEntry(avatar) : { id: avatar, type: 'emoji', emoji: avatar, name: avatar, animalType: animalTypes[avatar] || 'player' };
+  }
+  function avatarKey(avatar) {
+    var entry = resolveAvatarEntry(avatar);
+    return entry.type === 'emoji' ? entry.emoji : entry.id;
+  }
+  function aiAvatarOptions(usedAvatarIds, options) {
+    usedAvatarIds = usedAvatarIds || [];
+    options = options || {};
+    var registry = window.PerudoProfile && window.PerudoProfile.AVATAR_REGISTRY ? window.PerudoProfile.AVATAR_REGISTRY : avatars.map(function (emoji) { return { id: emoji, type: 'emoji', emoji: emoji, name: emoji, animalType: animalTypes[emoji] || 'player' }; });
+    var emoji = registry.filter(function (entry) { return entry.type === 'emoji'; });
+    var custom = (getAllowCustomAiAvatars() || options.forceCustom) ? registry.filter(function (entry) { return entry.type === 'customImage'; }) : [];
+    var preferCustom = options.forceCustom || (!options.forceEmoji && custom.length && Math.random() < 0.25);
+    var pool = preferCustom ? custom : emoji;
+    if (!pool.length) pool = emoji.concat(custom);
+    var unused = pool.filter(function (entry) { return usedAvatarIds.indexOf(entry.id) === -1; });
+    if (!unused.length && preferCustom) unused = emoji.filter(function (entry) { return usedAvatarIds.indexOf(entry.id) === -1; });
+    if (!unused.length) unused = pool;
+    return unused;
+  }
+  function chooseAIAvatarEntry(usedAvatarIds, options) {
+    var pool = aiAvatarOptions(usedAvatarIds, options);
+    return pool[Math.floor(Math.random() * pool.length)] || resolveAvatarEntry('🤖');
+  }
   function generateAIName(avatar, usedNames) {
-    var pool = namePools[avatar] || ['Dice Dana', 'Cup Casey', 'Bluff Blake'];
+    var key = avatarKey(avatar);
+    var entry = resolveAvatarEntry(avatar);
+    var pool = customNamePools[key] || namePools[key] || (entry.type === 'customImage' ? [entry.name, entry.name + ' Jr', entry.name + ' II'] : ['Dice Dana', 'Cup Casey', 'Bluff Blake']);
     var available = pool.filter(function (name) { return usedNames.indexOf(name) === -1; });
     return (available[0] || pool[Math.floor(Math.random() * pool.length)] + ' ' + Math.floor(Math.random() * 9));
   }
   function getAvatarPersonality(avatar) {
+    var entry = resolveAvatarEntry(avatar);
+    var key = avatarKey(avatar);
+    if (entry.defaultPersonality) return Object.assign({}, entry.defaultPersonality);
     var map = {
       '😈': ['Sarcastic Devil', 9, 3, 9, 5, 'Loves pressure and terrible choices.'],
       '🐺': ['Pack Bully', 7, 5, 8, 6, 'Circles weak bids.'],
@@ -138,7 +181,7 @@
       '🦉': ['Sharp Owl', 4, 9, 5, 8, 'Quiet, then horrible.'],
       '🐸': ['Pond Goblin', 8, 4, 7, 8, 'Jumpy little chaos merchant.']
     };
-    var p = map[avatar] || ['Mystery Guest', 5, 5, 5, 5, 'A puzzle with a cup.'];
+    var p = map[key] || ['Mystery Guest', 5, 5, 5, 5, 'A puzzle with a cup.'];
     return { type: p[0], bluffing: p[1], caution: p[2], aggression: p[3], luck: p[4], flavourLine: p[5] };
   }
   function getPlayStyleFromPersonality(personality) {
@@ -151,7 +194,7 @@
   function chooseAICupColour(avatar, name) {
     var stats = window.getLeaderboardStats ? window.getLeaderboardStats(name) : null;
     if (stats && stats.bestPerformingCupColour && stats.bestPerformingCupColour !== 'None' && Math.random() < 0.35) return stats.bestPerformingCupColour;
-    return defaultColours[avatar] || '#888888';
+    return defaultColours[avatarKey(avatar)] || '#888888';
   }
   function applyLeaderboardPersonalityModifiers(ai) {
     var stats = window.getLeaderboardStats ? window.getLeaderboardStats(ai.name) : null;
@@ -164,12 +207,16 @@
     ai.playStyle = getPlayStyleFromPersonality(ai.personality);
     return ai;
   }
-  function generateAIPlayer(index, usedNames) {
-    var avatar = avatars[Math.floor(Math.random() * avatars.length)];
-    var name = generateAIName(avatar, usedNames);
+  function generateAIPlayer(index, usedNames, usedAvatarIds, options) {
+    usedAvatarIds = usedAvatarIds || [];
+    var avatarEntry = chooseAIAvatarEntry(usedAvatarIds, options);
+    var avatar = avatarEntry.type === 'emoji' ? avatarEntry.emoji : avatarEntry.id;
+    var name = generateAIName(avatarEntry, usedNames);
     usedNames.push(name);
-    var personality = getAvatarPersonality(avatar);
-    var ai = { id: 'ai-' + index + '-' + Date.now(), ai: true, avatar: avatar, animalType: animalTypes[avatar] || 'player', playStyle: getPlayStyleFromPersonality(personality), moodLevel: 'calm', name: name, personality: personality, mood: 'calm', cupColour: chooseAICupColour(avatar, name), diceColour: chooseAICupColour(avatar, name), diceCount: 5, dice: [], events: {}, palaficoUsed: false, winStreakStatus: 'New Challenger' };
+    usedAvatarIds.push(avatarEntry.id);
+    var personality = getAvatarPersonality(avatarEntry);
+    var cupColour = chooseAICupColour(avatarEntry, name);
+    var ai = { id: 'ai-' + index + '-' + Date.now(), ai: true, avatar: avatar, avatarId: avatarEntry.id, avatarType: avatarEntry.type, avatarImageSrc: avatarEntry.imageSrc || '', avatarName: avatarEntry.name, animalType: avatarEntry.type === 'emoji' ? (animalTypes[avatar] || 'player') : (avatarEntry.animalType || 'custom'), playStyle: getPlayStyleFromPersonality(personality), moodLevel: 'calm', name: name, personality: personality, mood: 'calm', cupColour: cupColour, diceColour: cupColour, diceCount: 5, dice: [], events: {}, palaficoUsed: false, winStreakStatus: 'New Challenger' };
     ai.diceColour = ai.cupColour;
     return applyLeaderboardPersonalityModifiers(ai);
   }
@@ -726,6 +773,7 @@
     var aggressiveBigJumpScore = getRiskAppetite(cocky, bigJumpState) > getRiskAppetite(players[0], bigJumpState) && shouldAllowBigBidJump(cocky, bigJumpState);
     var safeOpeningBidState = Object.assign({}, openingState, { currentBid: { quantity: 4, face: 4 }, previousBidderId: 'b', bidCountThisRound: 1 });
     var safeOpeningDudoChance = getDudoCallChance(players[0], safeOpeningBidState);
+    var customAi = window.PerudoProfile ? generateAIPlayer(99, [], ['custom-ant-bunny'], { forceCustom: true }) : null;
     state.aiMemory.Bluffer = createPlayerMemory();
     state.aiMemory.Bluffer.totalBids = 10; state.aiMemory.Bluffer.failedBids = 7; refreshDerivedMemory(state.aiMemory.Bluffer);
     return {
@@ -760,10 +808,12 @@
       bidJumpsUsuallyGradual: gradualRaises,
       aggressiveCockyCanMakeBiggerJumps: aggressiveBigJumpScore,
       aiDoesNotInstantDudoSafeOpeningOften: safeOpeningDudoChance < .12,
-      palaficoOpeningStillLegal: !palAction || window.isLegalBid(palAction, null, Object.assign({}, pal, { currentBid: null, lockedFace: null }), players[0])
+      palaficoOpeningStillLegal: !palAction || window.isLegalBid(palAction, null, Object.assign({}, pal, { currentBid: null, lockedFace: null }), players[0]),
+      aiCanUseCustomAvatarsIfEnabled: !window.PerudoProfile || (customAi && customAi.avatarType === 'customImage'),
+      aiAvoidsDuplicateHumanAvatarWherePossible: !window.PerudoProfile || (customAi && customAi.avatarId !== 'custom-ant-bunny')
     };
   }
 
-  window.PerudoAI = { generateAIPlayer: generateAIPlayer, generateAIName: generateAIName, getAvatarPersonality: getAvatarPersonality, chooseAICupColour: chooseAICupColour, applyLeaderboardPersonalityModifiers: applyLeaderboardPersonalityModifiers, getAiSkillLevel: getAiSkillLevel, setAiSkillLevel: setAiSkillLevel, getBidTempo: getBidTempo, setBidTempo: setBidTempo, getMaxReasonableOpeningBid: getMaxReasonableOpeningBid, getBidJumpSize: getBidJumpSize, loadAiMemory: loadAiMemory, saveAiMemory: saveAiMemory, createPlayerMemory: createPlayerMemory, getPlayerMemory: getPlayerMemory, recordBidMemory: recordBidMemory, updateMemoryAfterDudo: updateMemoryAfterDudo, updateMemoryAfterCalza: updateMemoryAfterCalza, getRankNumber: getRankNumber, getRankTier: getRankTier, getRankGap: getRankGap, isHighRank: isHighRank, isLowRank: isLowRank, isCloseRank: isCloseRank, getOpponentThreatLevel: getOpponentThreatLevel, getTotalDiceInPlay: getTotalDiceInPlay, getKnownDiceForPlayer: getKnownDiceForPlayer, getFaceCountInOwnDice: getFaceCountInOwnDice, getExpectedFaceCount: getExpectedFaceCount, getBidRiskLevel: getBidRiskLevel, getBidConfidenceScore: getBidConfidenceScore, getLegalBidOptions: getLegalBidOptions, getDiceConfidenceBand: getDiceConfidenceBand, getDiceRiskModifier: getDiceRiskModifier, getRiskAppetite: getRiskAppetite, getDudoCallChance: getDudoCallChance, scoreBidOption: scoreBidOption, chooseBestBid: chooseBestBid, shouldCallDudo: shouldCallDudo, shouldCallCalza: shouldCallCalza, chooseAiAction: chooseAiAction, chooseAIMove: chooseAIMove, applyAIMoodEvent: applyAIMoodEvent, validateAiIntelligence: validateAiIntelligence };
+  window.PerudoAI = { generateAIPlayer: generateAIPlayer, generateAIName: generateAIName, getAvatarPersonality: getAvatarPersonality, chooseAICupColour: chooseAICupColour, chooseAIAvatarEntry: chooseAIAvatarEntry, getAllowCustomAiAvatars: getAllowCustomAiAvatars, setAllowCustomAiAvatars: setAllowCustomAiAvatars, applyLeaderboardPersonalityModifiers: applyLeaderboardPersonalityModifiers, getAiSkillLevel: getAiSkillLevel, setAiSkillLevel: setAiSkillLevel, getBidTempo: getBidTempo, setBidTempo: setBidTempo, getMaxReasonableOpeningBid: getMaxReasonableOpeningBid, getBidJumpSize: getBidJumpSize, loadAiMemory: loadAiMemory, saveAiMemory: saveAiMemory, createPlayerMemory: createPlayerMemory, getPlayerMemory: getPlayerMemory, recordBidMemory: recordBidMemory, updateMemoryAfterDudo: updateMemoryAfterDudo, updateMemoryAfterCalza: updateMemoryAfterCalza, getRankNumber: getRankNumber, getRankTier: getRankTier, getRankGap: getRankGap, isHighRank: isHighRank, isLowRank: isLowRank, isCloseRank: isCloseRank, getOpponentThreatLevel: getOpponentThreatLevel, getTotalDiceInPlay: getTotalDiceInPlay, getKnownDiceForPlayer: getKnownDiceForPlayer, getFaceCountInOwnDice: getFaceCountInOwnDice, getExpectedFaceCount: getExpectedFaceCount, getBidRiskLevel: getBidRiskLevel, getBidConfidenceScore: getBidConfidenceScore, getLegalBidOptions: getLegalBidOptions, getDiceConfidenceBand: getDiceConfidenceBand, getDiceRiskModifier: getDiceRiskModifier, getRiskAppetite: getRiskAppetite, getDudoCallChance: getDudoCallChance, scoreBidOption: scoreBidOption, chooseBestBid: chooseBestBid, shouldCallDudo: shouldCallDudo, shouldCallCalza: shouldCallCalza, chooseAiAction: chooseAiAction, chooseAIMove: chooseAIMove, applyAIMoodEvent: applyAIMoodEvent, validateAiIntelligence: validateAiIntelligence };
   Object.assign(window, window.PerudoAI);
 })();

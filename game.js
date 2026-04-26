@@ -50,6 +50,7 @@
     bidCountThisRound: 0,
     aiMemory: {},
     dudoStats: {},
+    eliminationOrder: [],
     revealMode: false,
     gameOver: false,
     turnBusy: false,
@@ -68,6 +69,7 @@
   };
 
   var DUDO_SHOUTS = ['DUDO!', 'Dudo!', 'Calling it!', 'That is nonsense!', 'No chance!', 'Caught you!'];
+  var CUP_COLOUR_PALETTE = ['#d9382e', '#2563eb', '#16a34a', '#facc15', '#f97316', '#7c3aed', '#ec4899', '#0d9488', '#8b5e34', '#6b7280'];
 
   function $(id) { return document.getElementById(id); }
   function activePlayers() { return window.PerudoRules.getActivePlayers(state.players); }
@@ -87,6 +89,29 @@
   function showScreen(id) { document.querySelectorAll('.screen').forEach(function (s) { s.classList.remove('active'); }); $(id).classList.add('active'); }
   function wait(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
   function randomBetween(min, max) { return min + Math.floor(Math.random() * (max - min + 1)); }
+  function normalizeHex(hex) { return String(hex || '').trim().toLowerCase(); }
+  function shuffleCopy(items) { return shuffle((items || []).slice()); }
+  function assignCupColours(players, humanCupColour) {
+    var humanColour = normalizeHex(humanCupColour);
+    var available = shuffleCopy(CUP_COLOUR_PALETTE.filter(function (colour) { return normalizeHex(colour) !== humanColour; }));
+    var reusable = shuffleCopy(CUP_COLOUR_PALETTE);
+    (players || []).forEach(function (player) {
+      if (!player || player.empty) return;
+      if (player.human) {
+        player.cupColour = humanCupColour;
+        player.cupColor = humanCupColour;
+        player.diceColour = humanCupColour;
+        player.diceColor = humanCupColour;
+        return;
+      }
+      var colour = available.shift() || reusable.shift() || '#2563eb';
+      player.cupColour = colour;
+      player.cupColor = colour;
+      player.diceColour = colour;
+      player.diceColor = colour;
+    });
+    return players;
+  }
   function peekNextPlayer() {
     for (var i = 1; i <= state.players.length; i += 1) {
       var idx = (state.turnIndex + i) % state.players.length;
@@ -575,9 +600,12 @@
     var seats = roll < 0.9 ? 5 : 4;
     var aiCount = roll < 0.8 ? 4 : 3;
     var used = [state.profile.name];
-    var players = [{ id: 'human', human: true, avatar: state.profile.avatar, name: state.profile.name, cupColour: state.profile.cupColour, diceColour: state.profile.cupColour, diceCount: 5, dice: [], mood: 'calm', events: {}, palaficoUsed: false }];
-    for (var i = 0; i < aiCount; i += 1) players.push(window.generateAIPlayer(i + 1, used));
+    var avatarEntry = window.getAvatarEntry ? window.getAvatarEntry(state.profile.avatarId || state.profile.avatar) : { id: state.profile.avatar, type: 'emoji', emoji: state.profile.avatar };
+    var players = [{ id: 'human', human: true, avatar: avatarEntry.type === 'emoji' ? avatarEntry.emoji : avatarEntry.id, avatarId: avatarEntry.id, avatarType: avatarEntry.type, avatarImageSrc: avatarEntry.imageSrc || '', avatarName: avatarEntry.name, animalType: avatarEntry.animalType || state.profile.animalType || 'player', name: state.profile.name, cupColour: state.profile.cupColour, diceColour: state.profile.cupColour, diceCount: 5, dice: [], mood: 'calm', events: {}, palaficoUsed: false }];
+    var usedAvatarIds = [avatarEntry.id];
+    for (var i = 0; i < aiCount; i += 1) players.push(window.generateAIPlayer(i + 1, used, usedAvatarIds));
     if (seats === 5 && aiCount === 3) players.push({ id: 'empty-seat', empty: true, name: 'Empty Seat', avatar: '∅', cupColour: '#555555', diceCount: 0, dice: [] });
+    assignCupColours(players, state.profile.cupColour);
     var seated = shuffle(players).map(function (p, index) { p.seatIndex = index; return p; });
     console.log('[INIT] players:', seated.length, seated.map(function (p) { return p && p.name; }));
     console.log('[INIT] table container found:', !!$('table'));
@@ -594,7 +622,7 @@
     $('opponentReveal').innerHTML = state.players.filter(function (p) { return p.ai; }).map(function (p, index) {
       var rank = window.getLeaderboardRankBadge(p.name);
       var stats = window.getLeaderboardStats(p.name);
-      return '<article class="reveal-card" style="animation-delay:' + (index * 80) + 'ms"><div class="avatar-line"><span class="avatar">' + p.avatar + '</span><strong>' + p.name + '</strong><span class="rank-badge">' + rank + '</span></div><div class="cup" style="--cup:' + p.cupColour + '"></div><p><strong>' + p.personality.type + '</strong></p><p>' + p.personality.flavourLine + '</p><div class="stat-line"><span>Bluffing</span><b>' + p.personality.bluffing + '/10</b></div><div class="stat-line"><span>Caution</span><b>' + p.personality.caution + '/10</b></div><div class="stat-line"><span>Aggression</span><b>' + p.personality.aggression + '/10</b></div><div class="stat-line"><span>Luck</span><b>' + p.personality.luck + '/10</b></div><p class="meta">' + (stats ? window.getStreakPressureLevel(stats.currentWinStreak) : 'New Challenger') + '</p></article>';
+      return '<article class="reveal-card" style="animation-delay:' + (index * 80) + 'ms"><div class="avatar-line">' + avatarHtml(p) + '<strong>' + safeText(p.name) + '</strong><span class="rank-badge">' + safeText(rank) + '</span></div><div class="cup" style="--cup:' + safeText(p.cupColour) + '"></div><p><strong>' + safeText(p.personality.type) + '</strong></p><p>' + safeText(p.personality.flavourLine) + '</p><div class="stat-line"><span>Bluffing</span><b>' + safeText(p.personality.bluffing) + '/10</b></div><div class="stat-line"><span>Caution</span><b>' + safeText(p.personality.caution) + '/10</b></div><div class="stat-line"><span>Aggression</span><b>' + safeText(p.personality.aggression) + '/10</b></div><div class="stat-line"><span>Luck</span><b>' + safeText(p.personality.luck) + '/10</b></div><p class="meta">' + safeText(stats ? window.getStreakPressureLevel(stats.currentWinStreak) : 'New Challenger') + '</p></article>';
     }).join('');
   }
 
@@ -602,6 +630,7 @@
     clearSlowTurnTimers();
     state.players.forEach(function (p) { if (!p.empty) { p.diceCount = 5; p.eliminated = false; p.spectator = false; p.events = {}; p.palaficoUsed = false; } });
     state.dudoStats = {};
+    state.eliminationOrder = [];
     state.pendingPalificoPlayerId = null;
     state.palaficoPlayerId = null;
     state.aceBidsThisRound = [];
@@ -677,7 +706,7 @@
     $('currentBidLabel').textContent = bidText(state.currentBid);
     renderPlayers();
     if (window.restoreSpeechBubbles) window.restoreSpeechBubbles();
-    $('spectators').innerHTML = state.players.filter(function (p) { return p && p.spectator; }).map(function (p) { return '<span class="spectator-chip">' + safeText(p.avatar || '🎲') + ' ' + safeText(p.name || 'Player') + ' ' + safeText(safeRankBadge(p)) + '</span>'; }).join('') || '<span class="meta">No spectators yet.</span>';
+    $('spectators').innerHTML = state.players.filter(function (p) { return p && p.spectator; }).map(function (p) { return '<span class="spectator-chip">' + avatarHtml(p, 'spectator-avatar') + ' ' + safeText(p.name || 'Player') + ' ' + safeText(safeRankBadge(p)) + '</span>'; }).join('') || '<span class="meta">No spectators yet.</span>';
     var humanTurn = currentPlayer() && currentPlayer().human && !state.gameOver && !state.turnBusy && !state.calzaWindowOpen;
     $('humanControls').classList.toggle('disabled', !humanTurn);
     $('humanControls').classList.toggle('human-ready', humanTurn);
@@ -726,6 +755,10 @@
     }
   }
 
+  function avatarHtml(player, extraClass) {
+    return window.renderAvatar ? window.renderAvatar(player, extraClass) : '<span class="avatar avatar-icon">' + safeText(player && player.avatar || '🎲') + '</span>';
+  }
+
   function normalizePlayerForRender(player) {
     player = player || {};
     return {
@@ -735,6 +768,11 @@
       eliminated: !!player.eliminated,
       spectator: !!player.spectator,
       avatar: player.avatar || (player.empty ? '○' : '🎲'),
+      avatarId: player.avatarId || player.avatar,
+      avatarType: player.avatarType || '',
+      avatarImageSrc: player.avatarImageSrc || '',
+      avatarName: player.avatarName || '',
+      animalType: player.animalType || '',
       name: player.name || (player.empty ? 'Empty Seat' : 'Player'),
       cupColour: player.cupColour || player.cupColor || '#777777',
       diceCount: Number.isFinite(player.diceCount) ? player.diceCount : 0,
@@ -788,7 +826,7 @@
 
   function renderSeatFallback(player) {
     var safe = normalizePlayerForRender(player);
-    return '<article class="seat" data-player-id="' + safeText(safe.id) + '"><div class="avatar-line"><span class="avatar">' + safeText(safe.avatar) + '</span><div><div class="player-name">' + safeText(safe.name) + '</div><span class="rank-badge">-</span></div></div><div class="cup" style="--cup:' + safeText(safe.cupColour) + '"></div><p class="meta">Mood: calm · Dice: ' + safeText(safe.diceCount) + '</p><div class="dice-row"></div></article>';
+    return '<article class="seat" data-player-id="' + safeText(safe.id) + '"><div class="avatar-line">' + avatarHtml(safe) + '<div><div class="player-name">' + safeText(safe.name) + '</div><span class="rank-badge">-</span></div></div><div class="cup" style="--cup:' + safeText(safe.cupColour) + '"></div><p class="meta">Mood: calm · Dice: ' + safeText(safe.diceCount) + '</p><div class="dice-row"></div></article>';
   }
 
   function renderSeat(p, index, activeSeatIndex, activeCount) {
@@ -810,7 +848,7 @@
     var palaficoHighlight = state.palaficoPlayerId === p.id && state.palificoActive ? ' palafico-highlight' : '';
     var eliminated = p.eliminated ? ' eliminated' : '';
     var mobileClass = ' player-count-' + safeText(activeCount || 0) + ' seat-pos-' + safeText(activeSeatIndex || 0);
-    return '<article class="seat player-card' + active + human + palaficoHighlight + eliminated + mobileClass + '" data-player-id="' + safeText(p.id) + '" style="--turn-color:' + safeText(p.cupColour) + '"><div class="avatar-line"><span class="avatar">' + safeText(p.avatar) + '</span><div><div class="player-name">' + safeText(p.name) + '</div><span class="rank-badge">' + safeText(rank) + '</span></div></div><div class="cup" style="--cup:' + safeText(p.cupColour) + '"></div><p class="meta">Mood: ' + safeText(p.mood) + ' · Dice: ' + safeText(p.diceCount) + '</p><div class="dice-row">' + dice + '</div></article>';
+    return '<article class="seat player-card' + active + human + palaficoHighlight + eliminated + mobileClass + '" data-player-id="' + safeText(p.id) + '" style="--turn-color:' + safeText(p.cupColour) + '"><div class="avatar-line">' + avatarHtml(p) + '<div><div class="player-name">' + safeText(p.name) + '</div><span class="rank-badge">' + safeText(rank) + '</span></div></div><div class="cup" style="--cup:' + safeText(p.cupColour) + '"></div><p class="meta">Mood: ' + safeText(p.mood) + ' · Dice: ' + safeText(p.diceCount) + '</p><div class="dice-row">' + dice + '</div></article>';
   }
 
   function legalBidsForFace(face, player, roundState) {
@@ -1250,6 +1288,7 @@
       state.pendingPalificoPlayerId = player.id;
     }
     if (player.diceCount <= 0) {
+      if (state.eliminationOrder.indexOf(player.id) === -1) state.eliminationOrder.push(player.id);
       player.spectator = true;
       player.mood = 'eliminated';
       setAction(player.name + ' has been eliminated.');
@@ -1287,10 +1326,10 @@
     window.animateWinnerDice(winner.id);
     window.maybeSpeak(winner, 'win', null, true);
     var previous = window.loadLeaderboard();
-    var update = window.updateLeaderboardAfterGame(state.players, winner.id, state.dudoStats, previous);
+    var update = window.updateLeaderboardAfterGame(state.players, winner.id, state.dudoStats, previous, state.eliminationOrder);
     showScreen('gameOverScreen');
-    $('winnerLabel').textContent = winner.avatar + ' ' + winner.name + ' wins the table!';
-    $('rankChanges').innerHTML = update.changes.map(function (change) {
+    $('winnerLabel').innerHTML = avatarHtml(winner, 'winner-avatar') + ' ' + safeText(winner.name) + ' wins the table!';
+    $('rankChanges').innerHTML = (window.renderGameResults ? window.renderGameResults(update.results) : '') + update.changes.map(function (change) {
       var klass = !change.oldRank ? 'rank-up' : change.newRank < change.oldRank ? 'rank-up' : change.newRank > change.oldRank ? 'rank-down' : '';
       if (change.newRank === 1) klass += ' rank-crown';
       if (klass.includes('rank-up')) window.playRankUpSound();
@@ -1321,7 +1360,7 @@
     $('skipAnimationsToggle').checked = localStorage.getItem('perudoSkipAnimations') === 'true';
     $('profileForm').addEventListener('submit', function (e) {
       e.preventDefault();
-      state.profile = window.saveProfile({ name: $('playerName').value.trim() || 'Player', avatar: $('avatarSelect').value, cupColour: $('cupColour').value });
+      state.profile = window.saveProfile({ name: $('playerName').value.trim() || 'Player', avatarId: $('avatarSelect').value, cupColour: $('cupColour').value });
       state.players = createPlayers();
       renderReveal();
       showScreen('revealScreen');
@@ -1672,6 +1711,27 @@
     }
   }
 
+  function runCupColourConsoleTests() {
+    var players = [
+      { id: 'human', human: true, name: 'Steve', cupColour: '#123456', diceColour: '#123456' },
+      { id: 'ai-a', ai: true, name: 'A', cupColour: '#888888', diceColour: '#888888' },
+      { id: 'ai-b', ai: true, name: 'B', cupColour: '#888888', diceColour: '#888888' },
+      { id: 'ai-c', ai: true, name: 'C', avatarType: 'customImage', cupColour: '#888888', diceColour: '#888888' },
+      { id: 'ai-d', ai: true, name: 'D', cupColour: '#888888', diceColour: '#888888' }
+    ];
+    assignCupColours(players, '#123456');
+    var ai = players.filter(function (p) { return p.ai; });
+    var colours = ai.map(function (p) { return p.cupColour; });
+    return {
+      aiPlayersDoNotAllDefaultToGrey: colours.some(function (colour) { return normalizeHex(colour) !== '#888888'; }) && new Set(colours).size > 1,
+      aiCupColoursUniqueWherePossible: new Set(colours).size === colours.length,
+      aiDiceColoursMatchCupColours: ai.every(function (p) { return p.diceColour === p.cupColour && p.diceColor === p.cupColour; }),
+      humanColourNotReusedWherePossible: ai.every(function (p) { return normalizeHex(p.cupColour) !== '#123456'; }),
+      customAvatarAiReceivesCupColour: normalizeHex(players[3].cupColour) !== '#888888',
+      humanSelectedColourPreserved: players[0].cupColour === '#123456' && players[0].diceColour === '#123456'
+    };
+  }
+
   function runConsoleTests() {
     var ruleFailures = window.runOfficialRulesTests ? window.runOfficialRulesTests() : ['Official rules test runner missing'];
     if (ruleFailures.length) {
@@ -1690,6 +1750,36 @@
     console.assert(window.validatePhraseBank(), 'AI speech uses smaller curated phrase pools');
     var banterChecks = window.validateBanterSystem ? window.validateBanterSystem() : {};
     var aiChecks = window.validateAiIntelligence ? window.validateAiIntelligence() : {};
+    var avatarChecks = window.validateAvatarSystem ? window.validateAvatarSystem() : {};
+    console.assert(avatarChecks.customAvatarsRegistered, 'Custom avatars are registered');
+    console.assert(avatarChecks.customAvatarPathResolves, 'Custom avatar path resolves');
+    console.assert(avatarChecks.avatarPickerIncludesCustom, 'Avatar picker includes custom avatars');
+    console.assert(avatarChecks.selectedCustomAvatarSaves, 'Selected custom avatar saves to localStorage');
+    console.assert(avatarChecks.selectedCustomAvatarRenders, 'Selected custom avatar renders in player card');
+    console.assert(avatarChecks.emojiAvatarsStillRender, 'Emoji avatars still render');
+    console.assert(avatarChecks.customAvatarPreviewRenders, 'Custom avatar preview renders when selected');
+    console.assert(avatarChecks.emojiAvatarPreviewStillWorks, 'Emoji avatar preview still works');
+    console.assert(avatarChecks.customAvatarLabelsClean, 'Custom avatar labels are clean');
+    console.assert(avatarChecks.missingImageFallsBackSafely, 'Missing image falls back safely');
+    var cupColourChecks = runCupColourConsoleTests();
+    console.assert(cupColourChecks.aiPlayersDoNotAllDefaultToGrey, 'AI players do not all default to grey');
+    console.assert(cupColourChecks.aiCupColoursUniqueWherePossible, 'AI cup colours are assigned uniquely where possible');
+    console.assert(cupColourChecks.aiDiceColoursMatchCupColours, 'AI dice colours match cup colours');
+    console.assert(cupColourChecks.humanColourNotReusedWherePossible, 'Human colour is not reused where possible');
+    console.assert(cupColourChecks.customAvatarAiReceivesCupColour, 'Custom avatar AI players still receive cup colours');
+    console.assert(cupColourChecks.humanSelectedColourPreserved, 'Human selected colour is preserved');
+    var leaderboardChecks = window.validateLeaderboardSystem ? window.validateLeaderboardSystem() : {};
+    console.assert(leaderboardChecks.pointsFormulaWorksForFivePlayers, 'Points formula works for 5 players');
+    console.assert(leaderboardChecks.pointsFormulaWorksForSixPlayers, 'Points formula works for 6 players');
+    console.assert(leaderboardChecks.lastPlaceAlwaysGetsZero, 'Last place always gets 0');
+    console.assert(leaderboardChecks.winnerGetsHighestPoints, 'Winner gets highest points');
+    console.assert(leaderboardChecks.allPlayersReceivePlacement, 'All players receive a placement');
+    console.assert(leaderboardChecks.winsIncrementForFirstOnly, 'Wins still increment for 1st place only');
+    console.assert(leaderboardChecks.totalPointsAccumulates, 'Total points accumulates across games');
+    console.assert(leaderboardChecks.leaderboardSortsByTotalPoints, 'Leaderboard sorts by totalPoints');
+    console.assert(leaderboardChecks.oldWinOnlyDataMigrates, 'Old win-only data migrates safely');
+    console.assert(leaderboardChecks.leaderboardMainViewClean, 'Leaderboard main view only shows clean core stats');
+    console.assert(leaderboardChecks.mobileLeaderboardDoesNotOverflow, 'Mobile leaderboard does not overflow');
     console.assert(banterChecks.reactionsTriggerAfterBids, 'Reactions trigger after bids');
     console.assert(banterChecks.nextPlayerPressureIncludesName, 'Next player pressure includes nextPlayer name');
     console.assert(banterChecks.humanBidsCanTriggerAIReactions, 'Human bids can trigger AI reactions');
@@ -1764,6 +1854,8 @@
     console.assert(aiChecks.aggressiveCockyCanMakeBiggerJumps, 'Aggressive/cocky players can still occasionally make bigger jumps');
     console.assert(aiChecks.aiDoesNotInstantDudoSafeOpeningOften, 'AI does not instantly Dudo safe opening bids too often');
     console.assert(aiChecks.palaficoOpeningStillLegal, 'Palafico opening logic still follows official rules');
+    console.assert(aiChecks.aiCanUseCustomAvatarsIfEnabled, 'AI can use custom avatars if enabled');
+    console.assert(aiChecks.aiAvoidsDuplicateHumanAvatarWherePossible, 'AI does not duplicate human avatar where possible');
     if (Object.values(banterChecks).every(Boolean) && Object.values(aiChecks).every(Boolean)) console.log('AI intelligence, mood, and banter validation passed');
     console.assert(!window.getBanterLine({ name: 'Test', id: 'test' }, 'bidding', null, { quantity: 6, face: 'threes', currentBid: '6 x threes' }).includes('['), 'Dynamic banter templates resolve variables');
     var countTargets = window.getChallengeCountTargets({ quantity: 1, face: 4 }, mock, false);
@@ -1826,7 +1918,8 @@
   }
   window.applySlowTurnMoodPressure = applySlowTurnMoodPressure;
   window.applySlowAiMoodPressure = applySlowAiMoodPressure;
-  window.PerudoGame = { state: state, PACE: PACE, startHumanTurnTimer: startHumanTurnTimer, clearSlowTurnTimers: clearSlowTurnTimers, applySlowTurnMoodPressure: applySlowTurnMoodPressure, selectSlowAiForRound: selectSlowAiForRound, runSlowAiTurnDelay: runSlowAiTurnDelay, applySlowAiMoodPressure: applySlowAiMoodPressure };
+  window.assignCupColours = assignCupColours;
+  window.PerudoGame = { state: state, PACE: PACE, assignCupColours: assignCupColours, startHumanTurnTimer: startHumanTurnTimer, clearSlowTurnTimers: clearSlowTurnTimers, applySlowTurnMoodPressure: applySlowTurnMoodPressure, selectSlowAiForRound: selectSlowAiForRound, runSlowAiTurnDelay: runSlowAiTurnDelay, applySlowAiMoodPressure: applySlowAiMoodPressure };
   document.addEventListener('DOMContentLoaded', function () { bindEvents(); runConsoleTests(); });
 })();
 
