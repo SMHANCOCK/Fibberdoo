@@ -10,16 +10,22 @@
   <main class="app-shell">
     <section id="profileScreen" class="screen profile-screen active">
       <div class="menu-stack">
-        <h1 class="main-title">FIBBERDOO</h1>
+        <h1 class="main-title fibber-title">FIBBERDOO</h1>
         <div class="hero-card menu-card">
           <p class="eyebrow">Browser dice bluffing</p>
-          <h2 class="menu-heading">Choose your cup.</h2>
-          <p class="intro">Wild aces, Palafico drama, and a table of suspiciously chatty opponents.</p>
-          <form id="profileForm" class="profile-form">
-            <label>Player name<input id="playerName" maxlength="18" required placeholder="Steve" /></label>
-            <label>Avatar<select id="avatarSelect"></select></label>
-            <label>Cup colour<input id="cupColour" type="color" value="#2f80ed" /></label>
-            <button type="submit" class="primary-button">Take a seat</button>
+          <h2 class="menu-heading">Choose Your Fibber</h2>
+          <p class="intro">Pick your portrait, choose your cup, then try to lie convincingly.</p>
+          <form id="profileForm" class="profile-form character-select-form">
+            <label class="name-field">Player name<input id="playerName" maxlength="18" required placeholder="Steve" /></label>
+            <select id="avatarSelect" class="avatar-select-hidden" aria-label="Selected character"></select>
+            <div id="avatarGrid" class="character-grid" aria-label="Character portraits"></div>
+            <aside class="character-preview" aria-live="polite">
+              <div id="avatarPreview"></div>
+              <div class="character-actions">
+                <label>Cup colour<input id="cupColour" type="color" value="#2f80ed" /></label>
+                <button type="submit" class="primary-button">Take a Seat</button>
+              </div>
+            </aside>
           </form>
         </div>
       </div>
@@ -37,7 +43,7 @@
       <div class="game-shell">
       <header class="game-header">
         <div>
-          <p class="game-brand">FIBBERDOO</p>
+          <p class="game-brand fibber-title">FIBBERDOO</p>
           <p class="eyebrow">Current bid</p>
           <h2 id="currentBidLabel">No bid yet</h2>
           <p id="palificoBanner" class="palifico-banner hidden"></p>

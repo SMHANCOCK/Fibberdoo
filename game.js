@@ -600,8 +600,8 @@
     var seats = roll < 0.9 ? 5 : 4;
     var aiCount = roll < 0.8 ? 4 : 3;
     var used = [state.profile.name];
-    var avatarEntry = window.getAvatarEntry ? window.getAvatarEntry(state.profile.avatarId || state.profile.avatar) : { id: state.profile.avatar, type: 'emoji', emoji: state.profile.avatar };
-    var players = [{ id: 'human', human: true, avatar: avatarEntry.type === 'emoji' ? avatarEntry.emoji : avatarEntry.id, avatarId: avatarEntry.id, avatarType: avatarEntry.type, avatarImageSrc: avatarEntry.imageSrc || '', avatarName: avatarEntry.name, animalType: avatarEntry.animalType || state.profile.animalType || 'player', name: state.profile.name, cupColour: state.profile.cupColour, diceColour: state.profile.cupColour, diceCount: 5, dice: [], mood: 'calm', events: {}, palaficoUsed: false }];
+    var avatarEntry = window.getAvatarEntry ? window.getAvatarEntry(state.profile.avatarId || state.profile.avatar) : { id: 'ant-bunny', type: 'customImage', imageSrc: './Assets/Custom Avatars/Ant Bunny.png', name: 'Ant Bunny', animalType: 'bunny' };
+    var players = [{ id: 'human', human: true, avatar: avatarEntry.id, avatarId: avatarEntry.id, avatarType: 'customImage', avatarImageSrc: avatarEntry.imageSrc || '', avatarName: avatarEntry.name, animalType: avatarEntry.animalType || state.profile.animalType || 'custom', name: state.profile.name, cupColour: state.profile.cupColour, diceColour: state.profile.cupColour, diceCount: 5, dice: [], mood: 'calm', events: {}, palaficoUsed: false }];
     var usedAvatarIds = [avatarEntry.id];
     for (var i = 0; i < aiCount; i += 1) players.push(window.generateAIPlayer(i + 1, used, usedAvatarIds));
     if (seats === 5 && aiCount === 3) players.push({ id: 'empty-seat', empty: true, name: 'Empty Seat', avatar: '∅', cupColour: '#555555', diceCount: 0, dice: [] });
@@ -756,7 +756,7 @@
   }
 
   function avatarHtml(player, extraClass) {
-    return window.renderAvatar ? window.renderAvatar(player, extraClass) : '<span class="avatar avatar-icon">' + safeText(player && player.avatar || '🎲') + '</span>';
+    return window.renderAvatar ? window.renderAvatar(player, extraClass) : '<span class="avatar avatar-icon avatar-fallback">?</span>';
   }
 
   function normalizePlayerForRender(player) {
@@ -767,7 +767,7 @@
       human: !!player.human,
       eliminated: !!player.eliminated,
       spectator: !!player.spectator,
-      avatar: player.avatar || (player.empty ? '○' : '🎲'),
+      avatar: player.avatar || (player.empty ? '' : 'ant-bunny'),
       avatarId: player.avatarId || player.avatar,
       avatarType: player.avatarType || '',
       avatarImageSrc: player.avatarImageSrc || '',
@@ -1732,6 +1732,46 @@
     };
   }
 
+  function runFontReadabilityConsoleTests() {
+    if (!document.body || !window.getComputedStyle) return {
+      fibberTitleUsesDecorative: true,
+      playerNamesUseReadableFont: true,
+      buttonTextUsesReadableFont: true,
+      dropdownUsesReadableFont: true,
+      chatTextUsesReadableFont: true,
+      leaderboardUsesReadableFont: true,
+      noDecorativeFontInSmallUiText: true
+    };
+    var probe = document.createElement('div');
+    probe.style.position = 'absolute';
+    probe.style.left = '-9999px';
+    probe.innerHTML = '<div class="player-name">Readable Player</div><button class="primary-button">Readable Button</button><select><option>Readable Option</option></select><div class="speech-bubble">Readable chat</div><div class="leaderboard-card"><span class="leaderboard-name">Readable Leaderboard</span></div><span class="rank-badge">Small</span>';
+    document.body.appendChild(probe);
+    var title = document.querySelector('.fibber-title');
+    function family(selector) {
+      var node = typeof selector === 'string' ? probe.querySelector(selector) : selector;
+      return node ? window.getComputedStyle(node).fontFamily.toLowerCase() : '';
+    }
+    function isDecorative(font) { return font.indexOf('fibbertitle') !== -1; }
+    var titleFont = family(title);
+    var playerFont = family('.player-name');
+    var buttonFont = family('.primary-button');
+    var dropdownFont = family('select');
+    var chatFont = family('.speech-bubble');
+    var leaderboardFont = family('.leaderboard-card');
+    var smallFont = family('.rank-badge');
+    probe.remove();
+    return {
+      fibberTitleUsesDecorative: isDecorative(titleFont),
+      playerNamesUseReadableFont: !isDecorative(playerFont),
+      buttonTextUsesReadableFont: !isDecorative(buttonFont),
+      dropdownUsesReadableFont: !isDecorative(dropdownFont),
+      chatTextUsesReadableFont: !isDecorative(chatFont),
+      leaderboardUsesReadableFont: !isDecorative(leaderboardFont),
+      noDecorativeFontInSmallUiText: !isDecorative(smallFont)
+    };
+  }
+
   function runConsoleTests() {
     var ruleFailures = window.runOfficialRulesTests ? window.runOfficialRulesTests() : ['Official rules test runner missing'];
     if (ruleFailures.length) {
@@ -1754,11 +1794,12 @@
     console.assert(avatarChecks.customAvatarsRegistered, 'Custom avatars are registered');
     console.assert(avatarChecks.customAvatarPathResolves, 'Custom avatar path resolves');
     console.assert(avatarChecks.avatarPickerIncludesCustom, 'Avatar picker includes custom avatars');
+    console.assert(avatarChecks.noEmojiAvatarsInSelector, 'No emoji avatars appear in selector');
+    console.assert(avatarChecks.characterGridShowsAllCustomAvatars, 'Character grid shows all custom avatars');
     console.assert(avatarChecks.selectedCustomAvatarSaves, 'Selected custom avatar saves to localStorage');
     console.assert(avatarChecks.selectedCustomAvatarRenders, 'Selected custom avatar renders in player card');
-    console.assert(avatarChecks.emojiAvatarsStillRender, 'Emoji avatars still render');
+    console.assert(avatarChecks.humanPlayerCardRendersSelectedImage, 'Human player card renders selected image');
     console.assert(avatarChecks.customAvatarPreviewRenders, 'Custom avatar preview renders when selected');
-    console.assert(avatarChecks.emojiAvatarPreviewStillWorks, 'Emoji avatar preview still works');
     console.assert(avatarChecks.customAvatarLabelsClean, 'Custom avatar labels are clean');
     console.assert(avatarChecks.missingImageFallsBackSafely, 'Missing image falls back safely');
     var cupColourChecks = runCupColourConsoleTests();
@@ -1768,6 +1809,14 @@
     console.assert(cupColourChecks.humanColourNotReusedWherePossible, 'Human colour is not reused where possible');
     console.assert(cupColourChecks.customAvatarAiReceivesCupColour, 'Custom avatar AI players still receive cup colours');
     console.assert(cupColourChecks.humanSelectedColourPreserved, 'Human selected colour is preserved');
+    var fontChecks = runFontReadabilityConsoleTests();
+    console.assert(fontChecks.fibberTitleUsesDecorative, 'FIBBERDOO title uses decorative font');
+    console.assert(fontChecks.playerNamesUseReadableFont, 'Player names use readable font');
+    console.assert(fontChecks.buttonTextUsesReadableFont, 'Button text uses readable font');
+    console.assert(fontChecks.dropdownUsesReadableFont, 'Dropdown labels use readable font');
+    console.assert(fontChecks.chatTextUsesReadableFont, 'Chat text uses readable font');
+    console.assert(fontChecks.leaderboardUsesReadableFont, 'Leaderboard uses readable font');
+    console.assert(fontChecks.noDecorativeFontInSmallUiText, 'No decorative font leaking into small UI text');
     var leaderboardChecks = window.validateLeaderboardSystem ? window.validateLeaderboardSystem() : {};
     console.assert(leaderboardChecks.pointsFormulaWorksForFivePlayers, 'Points formula works for 5 players');
     console.assert(leaderboardChecks.pointsFormulaWorksForSixPlayers, 'Points formula works for 6 players');
@@ -1855,6 +1904,7 @@
     console.assert(aiChecks.aiDoesNotInstantDudoSafeOpeningOften, 'AI does not instantly Dudo safe opening bids too often');
     console.assert(aiChecks.palaficoOpeningStillLegal, 'Palafico opening logic still follows official rules');
     console.assert(aiChecks.aiCanUseCustomAvatarsIfEnabled, 'AI can use custom avatars if enabled');
+    console.assert(aiChecks.aiUsesCustomAvatarsOnly, 'AI players use custom avatars only');
     console.assert(aiChecks.aiAvoidsDuplicateHumanAvatarWherePossible, 'AI does not duplicate human avatar where possible');
     if (Object.values(banterChecks).every(Boolean) && Object.values(aiChecks).every(Boolean)) console.log('AI intelligence, mood, and banter validation passed');
     console.assert(!window.getBanterLine({ name: 'Test', id: 'test' }, 'bidding', null, { quantity: 6, face: 'threes', currentBid: '6 x threes' }).includes('['), 'Dynamic banter templates resolve variables');
@@ -1901,14 +1951,14 @@
     console.assert(window.getCupColourWinRate(entry.cupColourUsage['#ffffff']) === 50, 'Cup colour stat tracking');
     var originalBoard = localStorage.getItem('perudoGlobalLeaderboard');
     var testPlayers = [
-      { id: 'test-a', name: '__Test Winner__', avatar: '🤖', cupColour: '#112233', empty: false, eliminated: false },
-      { id: 'test-b', name: '__Test Loser__', avatar: '🦊', cupColour: '#445566', empty: false, eliminated: true }
+      { id: 'test-a', name: '__Test Winner__', avatar: 'ant-bunny', avatarId: 'ant-bunny', avatarType: 'customImage', avatarImageSrc: './Assets/Custom Avatars/Ant Bunny.png', cupColour: '#112233', empty: false, eliminated: false },
+      { id: 'test-b', name: '__Test Loser__', avatar: 'matt-hammock', avatarId: 'matt-hammock', avatarType: 'customImage', avatarImageSrc: './Assets/Custom Avatars/Matt Hammock.png', cupColour: '#445566', empty: false, eliminated: true }
     ];
     var testUpdate = window.updateLeaderboardAfterGame(testPlayers, 'test-a', { 'test-a': { total: 7, largest: 7 } }, {});
     console.assert(testUpdate.board['__Test Winner__'].wins === 1 && testUpdate.board['__Test Winner__'].gamesPlayed === 1, 'Leaderboard updates');
     console.assert(testUpdate.board['__Test Winner__'].totalSuccessfulDudoQuantity === 7 && testUpdate.board['__Test Winner__'].largestSingleSuccessfulDudo === 7, 'Dudo stat tracking');
     if (originalBoard === null) localStorage.removeItem('perudoGlobalLeaderboard'); else localStorage.setItem('perudoGlobalLeaderboard', originalBoard);
-    console.assert(window.getLeaderboardRankBadge('No Such Player') === '🆕 New', 'Rank badge display');
+    console.assert(window.getLeaderboardRankBadge('No Such Player') === 'New', 'Rank badge display');
     console.assert(typeof window.animateRankChange === 'function', 'Rank animations function exists');
     console.assert(window.PerudoCups.getContrastColour('#000000') === '#fff8e7', 'Dice colour matching contrast');
     var originalSound = localStorage.getItem('perudoSoundSettings');

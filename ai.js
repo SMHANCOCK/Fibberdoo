@@ -2,34 +2,54 @@
   var SKILL_KEY = 'perudoAiSkillLevel';
   var MEMORY_KEY = 'perudoAiMemory';
   var TEMPO_KEY = 'perudoBidTempo';
-  var CUSTOM_AI_AVATARS_KEY = 'perudoAllowCustomAiAvatars';
   var SKILL_LEVELS = ['easy', 'normal', 'hard', 'expert'];
   var BID_TEMPOS = ['cautious', 'steady', 'aggressive'];
 
   var namePools = {
-    '🐺': ['Wolfgang', 'Lone Wolf Leo', 'Howler Harry'],
-    '😈': ['Devil Dave', 'Inferno Ian', 'Sinister Sam'],
-    '🦊': ['Cunning Charlie', 'Sneaky Fox Fred', 'Foxy Frank'],
-    '🤖': ['Robo Rick', 'Circuit Steve', 'Byte Bot Ben'],
-    '🦥': ['Lazy Larry', 'Slowpoke Sam', 'Chill Charlie'],
-    '🦈': ['Sharky Shaun', 'Finley Blue', 'Reef Rob'],
-    '🦄': ['Prism Pat', 'Glitter Gwen', 'Rainbow Rae'],
-    '🐻': ['Bristol Bear', 'Grizzly Gaz', 'Paddington Pete'],
-    '🦝': ['Bin Bag Barry', 'Rummage Ron', 'Wheelie Winnie'],
-    '🦆': ['Ducky Dan', 'Waddle Wendy', 'Quack Quentin'],
-    '🐱': ['Smug Cat Sid', 'Whiskers Will', 'Moggy Mae'],
-    '🦉': ['Oxford Owl', 'Wisdom Walt', 'Hoots Henry'],
-    '🐸': ['Froggy Phil', 'Pond Pete', 'Ribbit Rita']
+    'ally-hammock': ['Ally Hammock', 'Ally the Hammock', 'Hammock Ally'],
+    'amy-toothpaste': ['Amy Toothpaste', 'Minty Amy', 'Toothpaste Amy'],
+    'ant-bunny': ['Ant Bunny', 'Bunny Ant', 'Antony Bunny'],
+    'chris-leopard': ['Chris Leopard', 'Leopard Chris', 'Spotty Chris'],
+    'dan-pebbles': ['Dan Pebbles', 'Pebbles Dan', 'Danny Pebbles'],
+    'dave-purselover': ['Dave Purselover', 'Purse Dave', 'Dave the Bag'],
+    'harry-hammock': ['Harry Hammock', 'Hammock Harry', 'Lazy Harry'],
+    'josie-barbell': ['Josie Barbell', 'Barbell Josie', 'Heavy Josie'],
+    'ken-amarelle': ['Ken Amarelle', 'Careful Ken', 'Ken the Measured'],
+    'matt-hammock': ['Matt Hammock', 'Hammock Matt', 'Matty Hammock'],
+    'pete-socks': ['Pete Socks', 'Socksy Pete', 'Peter Socks'],
+    'russ-hammock': ['Russ Hammock', 'Hammock Russ', 'Dry Russ'],
+    'steve-hammock': ['Steve Hammock', 'Hammock Steve', 'Steve Snooze']
   };
-  var avatars = Object.keys(namePools);
-  var customNamePools = {
-    'custom-ant-bunny': ['Ant Bunny', 'Bunny Ant', 'Antony Bunny'],
-    'custom-matt-hammock': ['Matt Hammock', 'Hammock Matt', 'Matty Hammock'],
-    'custom-pete-socks': ['Pete Socks', 'Socksy Pete', 'Peter Socks'],
-    'custom-steve-hammock': ['Steve Hammock', 'Hammock Steve', 'Steve Snooze']
+  var fallbackAvatarRegistry = [
+    { id: 'ally-hammock', name: 'Ally Hammock', type: 'customImage', imageSrc: './Assets/Custom Avatars/Ally Hammock.png', personality: 'confident', animalType: 'custom' },
+    { id: 'amy-toothpaste', name: 'Amy Toothpaste', type: 'customImage', imageSrc: './Assets/Custom Avatars/Amy Toothpaste.png', personality: 'sharp', animalType: 'custom' },
+    { id: 'ant-bunny', name: 'Ant Bunny', type: 'customImage', imageSrc: './Assets/Custom Avatars/Ant Bunny.png', personality: 'chaotic', animalType: 'bunny' },
+    { id: 'chris-leopard', name: 'Chris Leopard', type: 'customImage', imageSrc: './Assets/Custom Avatars/Chris Leopard.png', personality: 'aggressive', animalType: 'leopard' },
+    { id: 'dan-pebbles', name: 'Dan Pebbles', type: 'customImage', imageSrc: './Assets/Custom Avatars/Dan Pebbles.png', personality: 'steady', animalType: 'custom' },
+    { id: 'dave-purselover', name: 'Dave Purselover', type: 'customImage', imageSrc: './Assets/Custom Avatars/Dave Purselover.png', personality: 'cocky', animalType: 'custom' },
+    { id: 'harry-hammock', name: 'Harry Hammock', type: 'customImage', imageSrc: './Assets/Custom Avatars/Harry Hammock.png', personality: 'calm', animalType: 'custom' },
+    { id: 'josie-barbell', name: 'Josie Barbell', type: 'customImage', imageSrc: './Assets/Custom Avatars/Josie Barbell.png', personality: 'aggressive', animalType: 'custom' },
+    { id: 'ken-amarelle', name: 'Ken Amarelle', type: 'customImage', imageSrc: './Assets/Custom Avatars/Ken Amarelle.png', personality: 'cautious', animalType: 'custom' },
+    { id: 'matt-hammock', name: 'Matt Hammock', type: 'customImage', imageSrc: './Assets/Custom Avatars/Matt Hammock.png', personality: 'cocky', animalType: 'custom' },
+    { id: 'pete-socks', name: 'Pete Socks', type: 'customImage', imageSrc: './Assets/Custom Avatars/Pete Socks.png', personality: 'sarcastic', animalType: 'custom' },
+    { id: 'russ-hammock', name: 'Russ Hammock', type: 'customImage', imageSrc: './Assets/Custom Avatars/Russ Hammock.png', personality: 'sarcastic', animalType: 'custom' },
+    { id: 'steve-hammock', name: 'Steve Hammock', type: 'customImage', imageSrc: './Assets/Custom Avatars/Steve Hammock.png', personality: 'calm', animalType: 'custom' }
+  ];
+  var defaultColours = {
+    'ally-hammock': '#f59e0b',
+    'amy-toothpaste': '#14b8a6',
+    'ant-bunny': '#ec4899',
+    'chris-leopard': '#d97706',
+    'dan-pebbles': '#64748b',
+    'dave-purselover': '#7c3aed',
+    'harry-hammock': '#84cc16',
+    'josie-barbell': '#dc2626',
+    'ken-amarelle': '#0ea5e9',
+    'matt-hammock': '#0d9488',
+    'pete-socks': '#f97316',
+    'russ-hammock': '#9333ea',
+    'steve-hammock': '#2563eb'
   };
-  var defaultColours = { '😈': '#a31522', '🐺': '#777f86', '🦊': '#e46f25', '🤖': '#8fa3ad', '🦥': '#817044', '🦈': '#55798d', '🦄': '#ff82c8', '🐻': '#8b5e34', '🦝': '#596066', '🦆': '#d7a927', '🐱': '#c47c43', '🦉': '#7a5c2e', '🐸': '#55a85a', 'custom-ant-bunny': '#ec4899', 'custom-matt-hammock': '#0d9488', 'custom-pete-socks': '#f97316', 'custom-steve-hammock': '#2563eb' };
-  var animalTypes = { '😈': 'devil', '🐺': 'wolf', '🦊': 'fox', '🤖': 'robot', '🦥': 'sloth', '🦈': 'shark', '🦄': 'unicorn', '🐻': 'bear', '🦝': 'raccoon', '🦆': 'duck', '🐱': 'cat', '🦉': 'owl', '🐸': 'frog' };
 
   function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
   function randomBetween(min, max) { return min + Math.random() * (max - min); }
@@ -47,12 +67,8 @@
   function setBidTempo(tempo) {
     localStorage.setItem(TEMPO_KEY, BID_TEMPOS.indexOf(tempo) === -1 ? 'steady' : tempo);
   }
-  function getAllowCustomAiAvatars() {
-    return localStorage.getItem(CUSTOM_AI_AVATARS_KEY) !== 'false';
-  }
-  function setAllowCustomAiAvatars(enabled) {
-    localStorage.setItem(CUSTOM_AI_AVATARS_KEY, enabled ? 'true' : 'false');
-  }
+  function getAllowCustomAiAvatars() { return true; }
+  function setAllowCustomAiAvatars() { localStorage.setItem('perudoAllowCustomAiAvatars', 'true'); }
   function tempoProfile(roundState) {
     var tempo = (roundState && roundState.bidTempo) || getBidTempo();
     return {
@@ -130,35 +146,35 @@
     saveAiMemory(memoryStore);
   }
 
+  function getCustomAvatarRegistry() {
+    var registry = window.PerudoProfile && window.PerudoProfile.AVATAR_REGISTRY ? window.PerudoProfile.AVATAR_REGISTRY : fallbackAvatarRegistry;
+    return registry.filter(function (entry) { return entry && entry.type === 'customImage'; });
+  }
   function resolveAvatarEntry(avatar) {
-    return window.getAvatarEntry ? window.getAvatarEntry(avatar) : { id: avatar, type: 'emoji', emoji: avatar, name: avatar, animalType: animalTypes[avatar] || 'player' };
+    if (window.getAvatarEntry) return window.getAvatarEntry(avatar);
+    var id = avatar && typeof avatar === 'object' ? (avatar.avatarId || avatar.id || avatar.avatar) : avatar;
+    return getCustomAvatarRegistry().find(function (entry) { return entry.id === id; }) || getCustomAvatarRegistry()[0];
   }
   function avatarKey(avatar) {
     var entry = resolveAvatarEntry(avatar);
-    return entry.type === 'emoji' ? entry.emoji : entry.id;
+    return entry.id;
   }
   function aiAvatarOptions(usedAvatarIds, options) {
     usedAvatarIds = usedAvatarIds || [];
     options = options || {};
-    var registry = window.PerudoProfile && window.PerudoProfile.AVATAR_REGISTRY ? window.PerudoProfile.AVATAR_REGISTRY : avatars.map(function (emoji) { return { id: emoji, type: 'emoji', emoji: emoji, name: emoji, animalType: animalTypes[emoji] || 'player' }; });
-    var emoji = registry.filter(function (entry) { return entry.type === 'emoji'; });
-    var custom = (getAllowCustomAiAvatars() || options.forceCustom) ? registry.filter(function (entry) { return entry.type === 'customImage'; }) : [];
-    var preferCustom = options.forceCustom || (!options.forceEmoji && custom.length && Math.random() < 0.25);
-    var pool = preferCustom ? custom : emoji;
-    if (!pool.length) pool = emoji.concat(custom);
+    var pool = getCustomAvatarRegistry();
     var unused = pool.filter(function (entry) { return usedAvatarIds.indexOf(entry.id) === -1; });
-    if (!unused.length && preferCustom) unused = emoji.filter(function (entry) { return usedAvatarIds.indexOf(entry.id) === -1; });
     if (!unused.length) unused = pool;
     return unused;
   }
   function chooseAIAvatarEntry(usedAvatarIds, options) {
     var pool = aiAvatarOptions(usedAvatarIds, options);
-    return pool[Math.floor(Math.random() * pool.length)] || resolveAvatarEntry('🤖');
+    return pool[Math.floor(Math.random() * pool.length)] || resolveAvatarEntry('ant-bunny');
   }
   function generateAIName(avatar, usedNames) {
     var key = avatarKey(avatar);
     var entry = resolveAvatarEntry(avatar);
-    var pool = customNamePools[key] || namePools[key] || (entry.type === 'customImage' ? [entry.name, entry.name + ' Jr', entry.name + ' II'] : ['Dice Dana', 'Cup Casey', 'Bluff Blake']);
+    var pool = namePools[key] || [entry.name, entry.name + ' Jr', entry.name + ' II'];
     var available = pool.filter(function (name) { return usedNames.indexOf(name) === -1; });
     return (available[0] || pool[Math.floor(Math.random() * pool.length)] + ' ' + Math.floor(Math.random() * 9));
   }
@@ -167,19 +183,19 @@
     var key = avatarKey(avatar);
     if (entry.defaultPersonality) return Object.assign({}, entry.defaultPersonality);
     var map = {
-      '😈': ['Sarcastic Devil', 9, 3, 9, 5, 'Loves pressure and terrible choices.'],
-      '🐺': ['Pack Bully', 7, 5, 8, 6, 'Circles weak bids.'],
-      '🦊': ['Sneaky Fox', 9, 6, 7, 7, 'Slippery little bidder.'],
-      '🤖': ['Dry Calculator', 4, 9, 5, 6, 'Annoyingly tidy maths.'],
-      '🦥': ['Chill Trap', 5, 9, 3, 8, 'Looks asleep. Is not.'],
-      '🦈': ['Table Shark', 6, 4, 10, 6, 'Pressure first, teeth second.'],
-      '🦄': ['Chaos Sparkle', 8, 4, 6, 9, 'Makes odd bids work.'],
-      '🐻': ['Pub Bouncer Bear', 6, 5, 9, 5, 'Big raises, bigger growl.'],
-      '🦝': ['Bin Goblin', 8, 3, 7, 8, 'Rummages through nonsense.'],
-      '🦆': ['Loose Duck', 7, 4, 6, 8, 'Waddles into danger.'],
-      '🐱': ['Smug Cat', 8, 6, 6, 7, 'Acts like it invented lying.'],
-      '🦉': ['Sharp Owl', 4, 9, 5, 8, 'Quiet, then horrible.'],
-      '🐸': ['Pond Goblin', 8, 4, 7, 8, 'Jumpy little chaos merchant.']
+      'ally-hammock': ['Hammock Headliner', 7, 5, 6, 7, 'Looks comfy. Plays loud.'],
+      'amy-toothpaste': ['Minty Menace', 5, 8, 5, 6, 'Fresh smile. Suspicious bids.'],
+      'ant-bunny': ['Chaotic Bunny', 8, 4, 6, 7, 'Tiny ears. Massive nonsense.'],
+      'chris-leopard': ['Leopard Lurker', 7, 5, 8, 6, 'Spots weakness quickly.'],
+      'dan-pebbles': ['Pebble Pusher', 6, 7, 5, 6, 'Small moves, annoying results.'],
+      'dave-purselover': ['Pocket Schemer', 8, 5, 7, 5, 'Keeps spare lies in the bag.'],
+      'harry-hammock': ['Lazy Blade', 6, 8, 4, 7, 'Barely moves. Still dangerous.'],
+      'josie-barbell': ['Heavy Raiser', 6, 5, 9, 5, 'Raises like it is leg day.'],
+      'ken-amarelle': ['Careful Customer', 5, 9, 4, 6, 'Checks the room twice.'],
+      'matt-hammock': ['Hammock Hustler', 7, 5, 6, 6, 'Looks relaxed. Probably lying.'],
+      'pete-socks': ['Sock Drawer Schemer', 6, 6, 5, 7, 'Odd socks, odder bids.'],
+      'russ-hammock': ['Dry Recliner', 7, 6, 5, 6, 'Says little. Means trouble.'],
+      'steve-hammock': ['Hammock Bluffer', 6, 8, 4, 6, 'Suspiciously comfortable under pressure.']
     };
     var p = map[key] || ['Mystery Guest', 5, 5, 5, 5, 'A puzzle with a cup.'];
     return { type: p[0], bluffing: p[1], caution: p[2], aggression: p[3], luck: p[4], flavourLine: p[5] };
@@ -210,13 +226,13 @@
   function generateAIPlayer(index, usedNames, usedAvatarIds, options) {
     usedAvatarIds = usedAvatarIds || [];
     var avatarEntry = chooseAIAvatarEntry(usedAvatarIds, options);
-    var avatar = avatarEntry.type === 'emoji' ? avatarEntry.emoji : avatarEntry.id;
+    var avatar = avatarEntry.id;
     var name = generateAIName(avatarEntry, usedNames);
     usedNames.push(name);
     usedAvatarIds.push(avatarEntry.id);
     var personality = getAvatarPersonality(avatarEntry);
     var cupColour = chooseAICupColour(avatarEntry, name);
-    var ai = { id: 'ai-' + index + '-' + Date.now(), ai: true, avatar: avatar, avatarId: avatarEntry.id, avatarType: avatarEntry.type, avatarImageSrc: avatarEntry.imageSrc || '', avatarName: avatarEntry.name, animalType: avatarEntry.type === 'emoji' ? (animalTypes[avatar] || 'player') : (avatarEntry.animalType || 'custom'), playStyle: getPlayStyleFromPersonality(personality), moodLevel: 'calm', name: name, personality: personality, mood: 'calm', cupColour: cupColour, diceColour: cupColour, diceCount: 5, dice: [], events: {}, palaficoUsed: false, winStreakStatus: 'New Challenger' };
+    var ai = { id: 'ai-' + index + '-' + Date.now(), ai: true, avatar: avatar, avatarId: avatarEntry.id, avatarType: 'customImage', avatarImageSrc: avatarEntry.imageSrc || '', avatarName: avatarEntry.name, animalType: avatarEntry.animalType || 'custom', playStyle: getPlayStyleFromPersonality(personality), moodLevel: 'calm', name: name, personality: personality, mood: 'calm', cupColour: cupColour, diceColour: cupColour, diceCount: 5, dice: [], events: {}, palaficoUsed: false, winStreakStatus: 'New Challenger' };
     ai.diceColour = ai.cupColour;
     return applyLeaderboardPersonalityModifiers(ai);
   }
@@ -773,7 +789,7 @@
     var aggressiveBigJumpScore = getRiskAppetite(cocky, bigJumpState) > getRiskAppetite(players[0], bigJumpState) && shouldAllowBigBidJump(cocky, bigJumpState);
     var safeOpeningBidState = Object.assign({}, openingState, { currentBid: { quantity: 4, face: 4 }, previousBidderId: 'b', bidCountThisRound: 1 });
     var safeOpeningDudoChance = getDudoCallChance(players[0], safeOpeningBidState);
-    var customAi = window.PerudoProfile ? generateAIPlayer(99, [], ['custom-ant-bunny'], { forceCustom: true }) : null;
+    var customAi = window.PerudoProfile ? generateAIPlayer(99, [], ['ant-bunny']) : null;
     state.aiMemory.Bluffer = createPlayerMemory();
     state.aiMemory.Bluffer.totalBids = 10; state.aiMemory.Bluffer.failedBids = 7; refreshDerivedMemory(state.aiMemory.Bluffer);
     return {
@@ -810,7 +826,8 @@
       aiDoesNotInstantDudoSafeOpeningOften: safeOpeningDudoChance < .12,
       palaficoOpeningStillLegal: !palAction || window.isLegalBid(palAction, null, Object.assign({}, pal, { currentBid: null, lockedFace: null }), players[0]),
       aiCanUseCustomAvatarsIfEnabled: !window.PerudoProfile || (customAi && customAi.avatarType === 'customImage'),
-      aiAvoidsDuplicateHumanAvatarWherePossible: !window.PerudoProfile || (customAi && customAi.avatarId !== 'custom-ant-bunny')
+      aiUsesCustomAvatarsOnly: !window.PerudoProfile || (customAi && customAi.avatarType === 'customImage' && !!customAi.avatarImageSrc),
+      aiAvoidsDuplicateHumanAvatarWherePossible: !window.PerudoProfile || (customAi && customAi.avatarId !== 'ant-bunny')
     };
   }
 

@@ -196,7 +196,7 @@
   }
 
   function getLeaderboardStats(name) { return loadLeaderboard()[name] || null; }
-  function avatarCell(entry) { return window.renderAvatar ? window.renderAvatar(entry, 'leaderboard-avatar') : escapeHtml(entry.avatar || '🎲'); }
+  function avatarCell(entry) { return window.renderAvatar ? window.renderAvatar(entry, 'leaderboard-avatar') : '<span class="avatar-fallback">?</span>'; }
 
   function renderLeaderboard(targetId) {
     var target = typeof targetId === 'string' ? document.getElementById(targetId) : targetId;
@@ -218,7 +218,7 @@
 
   function renderGameResults(results) {
     return '<section class="game-results-panel"><h3>Game Results</h3>' + (results || []).map(function (result) {
-      return '<div class="game-result-row"><span>' + escapeHtml(result.placementLabel) + ' - ' + (window.renderAvatar ? window.renderAvatar(result.player, 'result-avatar') : escapeHtml(result.player.avatar || '🎲')) + ' ' + escapeHtml(result.player.name) + '</span><strong>+' + escapeHtml(result.points) + ' pts</strong></div>';
+      return '<div class="game-result-row"><span>' + escapeHtml(result.placementLabel) + ' - ' + (window.renderAvatar ? window.renderAvatar(result.player, 'result-avatar') : '<span class="avatar-fallback">?</span>') + ' ' + escapeHtml(result.player.name) + '</span><strong>+' + escapeHtml(result.points) + ' pts</strong></div>';
     }).join('') + '</section>';
   }
 
@@ -232,11 +232,11 @@
 
   function validateLeaderboardSystem() {
     var players = [
-      { id: 'a', name: 'A', avatar: '😀', avatarId: '😀', cupColour: '#111', eliminated: false },
-      { id: 'b', name: 'B', avatar: '😎', avatarId: '😎', cupColour: '#222', eliminated: true },
-      { id: 'c', name: 'C', avatar: '🤖', avatarId: '🤖', cupColour: '#333', eliminated: true },
-      { id: 'd', name: 'D', avatar: '🐺', avatarId: '🐺', cupColour: '#444', eliminated: true },
-      { id: 'e', name: 'E', avatar: '🦊', avatarId: '🦊', cupColour: '#555', eliminated: true }
+      { id: 'a', name: 'A', avatar: 'ant-bunny', avatarId: 'ant-bunny', avatarType: 'customImage', avatarImageSrc: './Assets/Custom Avatars/Ant Bunny.png', cupColour: '#111', eliminated: false },
+      { id: 'b', name: 'B', avatar: 'matt-hammock', avatarId: 'matt-hammock', avatarType: 'customImage', avatarImageSrc: './Assets/Custom Avatars/Matt Hammock.png', cupColour: '#222', eliminated: true },
+      { id: 'c', name: 'C', avatar: 'pete-socks', avatarId: 'pete-socks', avatarType: 'customImage', avatarImageSrc: './Assets/Custom Avatars/Pete Socks.png', cupColour: '#333', eliminated: true },
+      { id: 'd', name: 'D', avatar: 'steve-hammock', avatarId: 'steve-hammock', avatarType: 'customImage', avatarImageSrc: './Assets/Custom Avatars/Steve Hammock.png', cupColour: '#444', eliminated: true },
+      { id: 'e', name: 'E', avatar: 'ant-bunny', avatarId: 'ant-bunny', avatarType: 'customImage', avatarImageSrc: './Assets/Custom Avatars/Ant Bunny.png', cupColour: '#555', eliminated: true }
     ];
     var old = localStorage.getItem(KEY);
     try {
@@ -244,7 +244,7 @@
       var sixWinner = calculatePlacementPoints(6, 1);
       var update1 = updateLeaderboardWithPlacements(results, {}, {});
       var update2 = updateLeaderboardWithPlacements(results, update1.board, {});
-      var migrated = migrateEntry({ name: 'Old', avatar: '😀', wins: 2 });
+      var migrated = migrateEntry({ name: 'Old', avatar: 'ant-bunny', avatarId: 'ant-bunny', wins: 2 });
       var cleanHtml = renderGameResults(results) + '<div class="leaderboard-cards"><article class="leaderboard-card"><div>Points Wins Games</div></article></div>';
       return {
         pointsFormulaWorksForFivePlayers: calculatePlacementPoints(5, 1) === 20 && calculatePlacementPoints(5, 4) === 5,

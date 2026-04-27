@@ -255,8 +255,8 @@
   function getAnimalType(player) {
     if (!player) return 'player';
     if (player.animalType) return player.animalType;
-    var map = { '🦊': 'fox', '🐻': 'bear', '🐼': 'bear', '🦝': 'raccoon', '🦫': 'capybara', '🦆': 'duck', '🐱': 'cat', '🦁': 'cat', '🐯': 'cat', '🦉': 'owl', '🐸': 'frog' };
-    return map[player.avatar] || 'player';
+    var entry = window.getAvatarEntry ? window.getAvatarEntry(player.avatarId || player.avatar) : null;
+    return entry && entry.animalType || 'player';
   }
   function getPlayStyle(player) {
     if (!player) return 'calm';
@@ -666,7 +666,7 @@
   function validateBanterSystem() {
     var savedLevel = localStorage.getItem('perudoBanterLevel');
     localStorage.setItem('perudoBanterLevel', '3');
-    var players = [{ id: 'a', name: 'Mia', avatar: '🦊', animalType: 'fox', ai: true, diceCount: 5 }, { id: 'human', name: 'Steve', avatar: '😎', human: true, diceCount: 5 }, { id: 'c', name: 'Raj', avatar: '🐻', animalType: 'bear', ai: true, diceCount: 1 }];
+    var players = [{ id: 'a', name: 'Mia', avatar: 'ant-bunny', avatarId: 'ant-bunny', animalType: 'bunny', ai: true, diceCount: 5 }, { id: 'human', name: 'Steve', avatar: 'steve-hammock', avatarId: 'steve-hammock', human: true, diceCount: 5 }, { id: 'c', name: 'Raj', avatar: 'matt-hammock', avatarId: 'matt-hammock', animalType: 'custom', ai: true, diceCount: 1 }];
     var pressureRoundState = { players: players, currentBid: { quantity: 8, face: 2 }, previousBidderId: 'human', turnIndex: 2 };
     var validPressureContext = { players: players, nextPlayer: players[2], bidder: players[1], target: players[1], bid: { quantity: 8, face: 2 }, currentBid: '8 twos', risk: 'absurd', phase: 'awaitingDecision', roundState: pressureRoundState };
     var pressure = getEventLine('pressureDudo', players[0], validPressureContext);
